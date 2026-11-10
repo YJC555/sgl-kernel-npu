@@ -17,6 +17,14 @@ export HCCL_INTRA_PCIE_ENABLE=0     # A3 关闭 A2 的分层 PCIe 通信
 export HCCL_INTRA_ROCE_ENABLE=1     # A3 跨节点走 RoCE
 export DEEPEp_BAREMETAL=1           # 裸机模式: 跳过 K8s 主节点发现
 
+# A3 分层通信: 节点内 16 卡先经 HCCS 聚合, 再经 RoCE 发到对端, 最后经 HCCS 送到目标专家
+# 置 1 时依赖 CANN >= 9.2.0; 置 0 则回退到 HCCL 全互联(CamMoeDispatchNormal)
+LAYERED=1
+if [ "${LAYERED}" == "1" ]; then
+  export DEEPEP_LAYERED_RANKS_PER_SERVER=16
+  export DEEPEP_LAYERED_PROTOCAL=roce
+fi
+
 export MASTER_ADDR=${RANK0_IP}
 if [ "${IP}" == "${RANK0_IP}" ]; then
   echo "env rank 0"

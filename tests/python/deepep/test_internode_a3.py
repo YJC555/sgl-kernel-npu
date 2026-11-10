@@ -38,8 +38,14 @@ MAX_BATCH_SIZE = 4096
 A3_LOCAL_RANKS = 16
 A3_NUM_NODES = 2
 
-# A3 正常模式 dispatch 在 device 侧对应的 kernel 名（节点内 HCCS + 跨节点 RoCE 由同一个 kernel 完成）
-A3_DISPATCH_KERNELS = ("cam_moe_dispatch_normal", "notify_dispatch")
+# A3 正常模式 dispatch 在 device 侧对应的 kernel 名
+# 分层模式（DEEPEP_LAYERED_RANKS_PER_SERVER=16）: 节点内 HCCS 聚合 -> RoCE 跨节点 -> 对端 HCCS 分发
+A3_LAYERED_DISPATCH_KERNELS = (
+    "cam_moe_dispatch_normal_layered",
+    "notify_dispatch_normal_layered",
+)
+# 非分层模式: HCCL 全互联，CamMoeDispatchNormal 内部完成节点间通信
+A3_FULLMESH_DISPATCH_KERNELS = ("cam_moe_dispatch_normal", "notify_dispatch")
 
 
 # noinspection PyShadowingNames
@@ -59,6 +65,14 @@ def test_main(
     enable_dynamic_tokens = args.enable_dynamic_tokens
     # A3: 每 16 个 rank 组成一个节点（节点内 HCCS），跨节点走 RoCE
     num_nodes = num_ranks // num_local_ranks
+    # num_rdma_ranks > 1 说明启用了 A3 分层通信（DEEPEP_LAYERED_RANKS_PER_SERVER）
+    is_layered = buffer.runtime.get_num_rdma_ranks() > 1
+    dispatch_kernels = (
+        A3_LAYERED_DISPATCH_KERNELS if is_layered else A3_FULLMESH_DISPATCH_KERNELS
+    )
+    # handle 布局不同: 分层/internode 为 (recv_src_idx, is_token_in_rank, send_head, topk_idx,
+    # topk_weights, ...)，全互联(intranode) 为 (..., is_token_in_rank, send_head, topk_idx, topk_weights)
+    topk_weights_idx = 4 if is_layered else 7
     expert_token_nums_type = int(os.getenv("MOE_EXPERT_TOKEN_NUMS_TYPE", 1))
 
     if enable_dynamic_tokens:
@@ -85,6 +99,7 @@ def test_main(
         print(
             f"[config] num_tokens={num_tokens}, hidden={hidden}, num_topk={num_topk}, "
             f"num_experts={num_experts}, num_local_ranks={num_local_ranks}, num_nodes={num_nodes}, "
+            f"routing={'layered(HCCS->RoCE->HCCS)' if is_layered else 'fullmesh(HCCL)'}, "
             f"active_ranks={args.active_ranks}",
             flush=True,
         )
@@ -294,7 +309,7 @@ def test_main(
                 combine_args = {
                     "x": recv_x,
                     "handle": handle,
-                    "topk_weights": handle[4],
+                    "topk_weights": handle[topk_weights_idx],
                     "config": combine_config,
                     "async_finish": False,
                     "combine_send_cost_stats": combine_send_cost_stats,
@@ -373,15 +388,15 @@ def test_main(
                 "handle": handle,
                 "config": combine_config,
                 "async_finish": False,
-                "topk_weights": handle[4],
+                "topk_weights": handle[topk_weights_idx],
             }
             combined_x, combined_topk_weights, event = buffer.combine(**combine_args)
             check_x = combined_x.float()
             ref_x = x_pure_rand if current_x is x_pure_rand else x
             mask = ~torch.all(topk_idx == -1, dim=1)
-            desire_x = ref_x * handle[4].masked_fill(topk_idx == -1, 0).sum(dim=1).view(
-                -1, 1
-            )
+            desire_x = ref_x * handle[topk_weights_idx].masked_fill(
+                topk_idx == -1, 0
+            ).sum(dim=1).view(-1, 1)
             assert calc_diff(
                 check_x[mask],
                 desire_x[mask],
@@ -428,7 +443,7 @@ def test_main(
 
             t, notify_t = bench_kineto(
                 lambda: buffer.dispatch(**tune_args),
-                A3_DISPATCH_KERNELS,
+                dispatch_kernels,
             )
             if local_rank == 0:
                 print(
@@ -445,7 +460,7 @@ def test_main(
             "handle": handle,
             "config": combine_config,
             "async_finish": False,
-            "topk_weights": handle[4],
+            "topk_weights": handle[topk_weights_idx],
         }
         t = bench(lambda: buffer.combine(**tune_args))[0]
         if local_rank == 0:
