@@ -48,6 +48,11 @@ A3_LAYERED_DISPATCH_KERNELS = (
 A3_FULLMESH_DISPATCH_KERNELS = ("cam_moe_dispatch_normal", "notify_dispatch")
 
 
+def log_rank(rank: int, stage: str, message: str) -> None:
+    """统一日志打印: 带 rank 前缀并立即 flush, 所有 rank 均会输出。"""
+    print(f"[Rank {rank}] [{stage}] {message}", flush=True)
+
+
 # noinspection PyShadowingNames
 def test_main(
     args: argparse.Namespace,
@@ -92,6 +97,17 @@ def test_main(
         num_tokens = max(num_tokens, 1)
     else:
         num_tokens = base_num_tokens
+
+    log_rank(
+        rank,
+        "config",
+        f"num_tokens={num_tokens}, hidden={hidden}, num_topk={num_topk}, "
+        f"num_experts={num_experts}, num_local_ranks={num_local_ranks}, num_nodes={num_nodes}, "
+        f"num_rdma_ranks={buffer.runtime.get_num_rdma_ranks()}, is_layered={is_layered}, "
+        f"dispatch_kernels={dispatch_kernels}, topk_weights_idx={topk_weights_idx}, "
+        f"expert_token_nums_type={expert_token_nums_type}, "
+        f"active_ranks={args.active_ranks or 'all'}",
+    )
 
     assert num_experts % num_ranks == 0 and num_nodes >= 2
     assert num_tokens <= MAX_BATCH_SIZE
@@ -223,8 +239,17 @@ def test_main(
     gbl_num_tokens_per_rank = num_tokens_per_rank.clone()
     dist.all_reduce(gbl_num_tokens_per_rank, group=group)
 
+    log_rank(
+        rank,
+        "layout-input",
+        f"local num_tokens_per_rank(sum={int(num_tokens_per_rank.sum())}, "
+        f"max={int(num_tokens_per_rank.max())}, min={int(num_tokens_per_rank.min())}), "
+        f"num_rdma_token_sent={num_rdma_token_sent}, "
+        f"local num_tokens_per_expert(sum={int(num_tokens_per_expert.sum())})",
+    )
+
     t = bench(lambda: buffer.get_dispatch_layout(topk_idx, num_experts))[0]
-    print(f"[layout] Kernel performance: {t * 1000:.3f} ms", flush=True)
+    log_rank(rank, "layout-bench", f"get_dispatch_layout kernel: {t * 1000:.3f} ms")
     print("", flush=True)
     dist.barrier()
     time.sleep(1)
@@ -233,7 +258,7 @@ def test_main(
         try:
             return_values = buffer.get_dispatch_layout(topk_idx, num_experts)
         except Exception as e:
-            print(f"Error occurred while calling get_dispatch_layout: {e}")
+            log_rank(rank, "layout-check", f"调用 get_dispatch_layout 失败: {e}")
             raise
 
         (
@@ -254,10 +279,11 @@ def test_main(
                 ref_is_token_in_rank, is_token_in_rank
             ), f"Assertion is_token_in_rank failed on rank {rank}: Expected {is_token_in_rank}, Actual {ref_is_token_in_rank}"
         except AssertionError as e:
-            print(e)
+            log_rank(rank, "layout-check", f"结果校验失败: {e}")
             raise
+        log_rank(rank, "layout-check", "get_dispatch_layout 结果与本地参考一致")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        log_rank(rank, "layout-check", f"发生异常: {e}")
 
     # Config: 32 个 EP rank（A3 双节点）对应的推荐配置
     dispatch_config = deep_ep.Buffer.get_dispatch_config(num_ranks)
@@ -279,6 +305,12 @@ def test_main(
         dispatch_wait_recv_cost_stats: Optional[torch.Tensor] = None,
         combine_send_cost_stats: Optional[torch.Tensor] = None,
     ):
+        log_rank(
+            rank,
+            "diagnose",
+            f"dispatch_wait_recv_cost_stats={'on' if dispatch_wait_recv_cost_stats is not None else 'off'}, "
+            f"combine_send_cost_stats={'on' if combine_send_cost_stats is not None else 'off'}",
+        )
         for current_x in filter(lambda elem: elem is not None, (x_pure_rand,)):
             dispatch_args = {
                 "x": current_x,
@@ -341,11 +373,17 @@ def test_main(
 
     def test_correctness():
         for current_x in filter(lambda elem: elem is not None, (x_pure_rand, x)):
+            x_tag = "x_pure_rand" if current_x is x_pure_rand else "x"
             if local_rank == 0:
                 print(
                     f"[testing] Running with BF16, with top-k {num_topk} ...",
                     flush=True,
                 )
+            log_rank(
+                rank,
+                "correctness",
+                f"dispatch start, data={x_tag}, x.shape={tuple(current_x.shape)}",
+            )
             # Test dispatch
             dispatch_args = {
                 "x": current_x,
@@ -370,6 +408,14 @@ def test_main(
             recv_x = (
                 per_token_cast_back(*recv_x) if isinstance(recv_x, tuple) else recv_x
             )
+            log_rank(
+                rank,
+                "correctness",
+                f"dispatch done, data={x_tag}, recv_x.shape={tuple(recv_x.shape)}, "
+                f"recv_num_tokens_per_expert={recv_num_tokens_per_expert_list}, "
+                f"handle.len={len(handle)}, "
+                f"handle[{topk_weights_idx}].shape={tuple(handle[topk_weights_idx].shape)}",
+            )
 
             # Checks
             local_expert_token = gbl_num_tokens_per_expert.view(num_ranks, -1)[rank]
@@ -381,6 +427,12 @@ def test_main(
                 local_expert_token_list = local_expert_token.tolist()
 
             assert local_expert_token_list == recv_num_tokens_per_expert_list
+            log_rank(
+                rank,
+                "correctness",
+                f"expert token nums check passed, data={x_tag}, "
+                f"local_expert_token_list={local_expert_token_list}",
+            )
 
             # Test combine
             combine_args = {
@@ -397,13 +449,16 @@ def test_main(
             desire_x = ref_x * handle[topk_weights_idx].masked_fill(
                 topk_idx == -1, 0
             ).sum(dim=1).view(-1, 1)
-            assert calc_diff(
-                check_x[mask],
-                desire_x[mask],
-            ) < get_diff_threshold("bf16")
+            diff = calc_diff(check_x[mask], desire_x[mask])
+            log_rank(
+                rank,
+                "correctness",
+                f"combine done, data={x_tag}, combined_x.shape={tuple(combined_x.shape)}, "
+                f"diff={diff:.6f}, threshold={get_diff_threshold('bf16')}",
+            )
+            assert diff < get_diff_threshold("bf16")
 
-            if local_rank == 0:
-                print(" passed", flush=True)
+            log_rank(rank, "correctness", f"passed, data={x_tag}")
         if local_rank == 0:
             print("", flush=True)
 
@@ -419,6 +474,12 @@ def test_main(
         }
         recv_x, _, _, _, handle, _ = buffer.dispatch(**dispatch_args)
         recv_x = per_token_cast_back(*recv_x) if isinstance(recv_x, tuple) else recv_x
+        log_rank(
+            rank,
+            "tuning",
+            f"dispatch done for tuning, recv_x.shape={tuple(recv_x.shape)}, "
+            f"handle.len={len(handle)}",
+        )
 
         # For later tuning
         dispatch_bf16_remote_send_bytes = num_rdma_token_sent * hidden * 2
@@ -445,13 +506,15 @@ def test_main(
                 lambda: buffer.dispatch(**tune_args),
                 dispatch_kernels,
             )
+            log_rank(
+                rank,
+                "tuning",
+                f"Dispatch (BF16) {recv_bytes / 1e9 / t:.2f} GB/s (HCCS), "
+                f"{remote_send_bytes / 1e9 / t:.2f} GB/s (RoCE cross-node), "
+                f"avg_t: {t * 1e6:.2f} us, notify_t: {notify_t * 1e6:.2f} us, "
+                f"kernels={dispatch_kernels}",
+            )
             if local_rank == 0:
-                print(
-                    f"[tuning] Dispatch (BF16) {recv_bytes / 1e9 / t:.2f} GB/s (HCCS), "
-                    f"{remote_send_bytes / 1e9 / t:.2f} GB/s (RoCE cross-node), "
-                    f"avg_t: {t * 1e6:.2f} us, notify_t: {notify_t * 1e6:.2f} us",
-                    flush=True,
-                )
                 print("", flush=True)
 
         # Tune combine performance
@@ -463,20 +526,25 @@ def test_main(
             "topk_weights": handle[topk_weights_idx],
         }
         t = bench(lambda: buffer.combine(**tune_args))[0]
+        log_rank(
+            rank,
+            "tuning",
+            f"Combine {combine_bf16_send_bytes / 1e9 / t:.2f} GB/s (HCCS), "
+            f"{combine_bf16_remote_recv_bytes / 1e9 / t:.2f} GB/s (RoCE cross-node), "
+            f"avg_t: {t * 1e6:.2f} us",
+        )
         if local_rank == 0:
-            print(
-                f"[tuning] Combine {combine_bf16_send_bytes / 1e9 / t:.2f} GB/s (HCCS), "
-                f"{combine_bf16_remote_recv_bytes / 1e9 / t:.2f} GB/s (RoCE cross-node), "
-                f"avg_t: {t * 1e6:.2f} us",
-                flush=True,
-            )
             print("", flush=True)
 
+    log_rank(rank, "stage", "开始 correctness 校验")
     test_correctness()
+    log_rank(rank, "stage", "correctness 校验完成, 开始性能 tuning")
     test_tuning()
+    log_rank(rank, "stage", "性能 tuning 完成")
 
     # Diagnose test
     if enable_diagnose:
+        log_rank(rank, "diagnose", "开始 diagnose 测试")
         dispatch_wait_recv_cost_stats = torch.zeros(
             (num_ranks,), dtype=torch.int32, device="npu"
         )
@@ -487,11 +555,18 @@ def test_main(
             dispatch_wait_recv_cost_stats=dispatch_wait_recv_cost_stats,
             combine_send_cost_stats=combine_send_cost_stats,
         )
+        log_rank(rank, "diagnose", "diagnose 测试完成")
 
 
 # noinspection PyUnboundLocalVariable,PyShadowingNames
 def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
+    print(f"[local_rank {local_rank}] 开始 init_dist", flush=True)
     rank, num_ranks, group = init_dist(local_rank, num_local_ranks)
+    log_rank(
+        rank,
+        "init",
+        f"dist 初始化完成, num_ranks={num_ranks}, num_local_ranks={num_local_ranks}",
+    )
 
     # A3 拓扑校验: 2 节点 x 16 卡
     assert num_local_ranks == A3_LOCAL_RANKS, (
@@ -503,15 +578,28 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
         f"{A3_LOCAL_RANKS * A3_NUM_NODES} ranks, got num_ranks={num_ranks}. "
         f"Check WORLD_SIZE (number of nodes) and RANK."
     )
+    log_rank(
+        rank,
+        "init",
+        f"A3 拓扑校验通过 ({A3_NUM_NODES} nodes x {A3_LOCAL_RANKS} NPUs)",
+    )
 
-    print(f"[Rank {rank} | Local rank {local_rank}] Initializing buffer...", flush=True)
+    log_rank(rank, "init", f"local_rank={local_rank}, 开始创建 Buffer...")
+    t0 = time.time()
     buffer = deep_ep.Buffer(
         group, int(2e9), 0, low_latency_mode=False, num_qps_per_rank=1
     )
-    print(f"[Rank {rank}] Buffer created OK.", flush=True)
+    log_rank(
+        rank,
+        "init",
+        f"Buffer 创建完成, 耗时 {time.time() - t0:.2f}s, "
+        f"num_rdma_ranks={buffer.runtime.get_num_rdma_ranks()}",
+    )
     torch.manual_seed(rank)
 
+    log_rank(rank, "stage", "开始 test_main")
     test_main(args, num_local_ranks, local_rank, num_ranks, rank, buffer, group)
+    log_rank(rank, "done", "test_main 全部完成")
     if local_rank == 0:
         print("", flush=True)
 
