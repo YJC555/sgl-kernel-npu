@@ -13,6 +13,7 @@
 import argparse
 import os
 import random
+import sys
 import time
 from typing import Optional
 
@@ -51,6 +52,50 @@ A3_FULLMESH_DISPATCH_KERNELS = ("CamMoeDispatchNormal", "NotifyDispatch")
 def log_rank(rank: int, stage: str, message: str) -> None:
     """统一日志打印: 带 rank 前缀并立即 flush, 所有 rank 均会输出。"""
     print(f"[Rank {rank}] [{stage}] {message}", flush=True)
+
+
+class _TeeStream:
+    """把流同时写到终端和日志文件。
+
+    按行攒批后用一次 os.write 写入, 保证同一节点内多个 rank 并发追加时
+    每行日志完整、不互相穿插。
+    """
+
+    def __init__(self, console, file_fd: int):
+        self._console = console
+        self._fd = file_fd
+        self._pending = ""
+
+    def write(self, data: str) -> int:
+        self._console.write(data)
+        self._pending += data
+        if "\n" in self._pending:
+            lines = self._pending.split("\n")
+            self._pending = lines.pop()
+            self._write_file("\n".join(lines) + "\n")
+        return len(data)
+
+    def flush(self) -> None:
+        self._console.flush()
+        if self._pending:
+            self._write_file(self._pending)
+            self._pending = ""
+
+    def _write_file(self, data: str) -> None:
+        view = memoryview(data.encode("utf-8", "replace"))
+        while view:
+            view = view[os.write(self._fd, view) :]
+
+    def __getattr__(self, name):
+        return getattr(self._console, name)
+
+
+def enable_log_file(log_file: str) -> None:
+    """把当前进程的 stdout/stderr 同时写入 log_file。"""
+    os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+    fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    sys.stdout = _TeeStream(sys.stdout, fd)
+    sys.stderr = _TeeStream(sys.stderr, fd)
 
 
 # noinspection PyShadowingNames
@@ -560,7 +605,11 @@ def test_main(
 
 # noinspection PyUnboundLocalVariable,PyShadowingNames
 def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
-    print(f"[local_rank {local_rank}] 开始 init_dist", flush=True)
+    enable_log_file(args.log_file)
+    print(
+        f"[local_rank {local_rank}] 开始 init_dist, 日志文件: {args.log_file}",
+        flush=True,
+    )
     rank, num_ranks, group = init_dist(local_rank, num_local_ranks)
     log_rank(
         rank,
@@ -658,6 +707,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to enable dynamic tokens for testing",
     )
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default="logs",
+        help="Directory of the per-node log file (default: logs)",
+    )
     args = parser.parse_args()
 
     if os.getenv("DEEPEp_BAREMETAL") == "1":
@@ -668,6 +723,16 @@ if __name__ == "__main__":
         from test_internode_a2_set_env import set_environment
 
         set_environment()
+
+    # 每个节点一个日志文件, 节点内 16 个 rank 追加写入同一个文件
+    node_rank = os.getenv("RANK", "0")
+    args.log_file = os.path.abspath(
+        os.path.join(
+            args.log_dir,
+            f"a3_internode_node{node_rank}_{time.strftime('%Y%m%d_%H%M%S')}.log",
+        )
+    )
+    print(f"[log] 本节点日志文件: {args.log_file}", flush=True)
 
     num_processes = args.num_processes
     num_nodes = int(os.getenv("WORLD_SIZE", 1))
