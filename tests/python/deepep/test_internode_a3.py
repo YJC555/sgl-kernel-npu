@@ -41,11 +41,11 @@ A3_NUM_NODES = 2
 # A3 正常模式 dispatch 在 device 侧对应的 kernel 名
 # 分层模式（DEEPEP_LAYERED_RANKS_PER_SERVER=16）: 节点内 HCCS 聚合 -> RoCE 跨节点 -> 对端 HCCS 分发
 A3_LAYERED_DISPATCH_KERNELS = (
-    "cam_moe_dispatch_normal_layered",
-    "notify_dispatch_normal_layered",
+    "CamMoeDispatchNormalLayered",
+    "NotifyDispatchNormalLayered",
 )
 # 非分层模式: HCCL 全互联，CamMoeDispatchNormal 内部完成节点间通信
-A3_FULLMESH_DISPATCH_KERNELS = ("cam_moe_dispatch_normal", "notify_dispatch")
+A3_FULLMESH_DISPATCH_KERNELS = ("CamMoeDispatchNormal", "NotifyDispatch")
 
 
 def log_rank(rank: int, stage: str, message: str) -> None:
