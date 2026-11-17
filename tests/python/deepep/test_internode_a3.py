@@ -151,8 +151,19 @@ def test_main(
         f"num_rdma_ranks={buffer.runtime.get_num_rdma_ranks()}, is_layered={is_layered}, "
         f"dispatch_kernels={dispatch_kernels}, topk_weights_idx={topk_weights_idx}, "
         f"expert_token_nums_type={expert_token_nums_type}, "
+        f"env_layered_ranks_per_server={os.getenv('DEEPEP_LAYERED_RANKS_PER_SERVER')}, "
+        f"env_layered_protocal={os.getenv('DEEPEP_LAYERED_PROTOCAL')}, "
         f"active_ranks={args.active_ranks or 'all'}",
     )
+
+    if os.getenv("DEEPEP_LAYERED_RANKS_PER_SERVER") is not None and not is_layered:
+        raise RuntimeError(
+            f"DEEPEP_LAYERED_RANKS_PER_SERVER={os.getenv('DEEPEP_LAYERED_RANKS_PER_SERVER')} "
+            f"已设置, 但 Buffer 未进入分层模式 (num_rdma_ranks=1)。请检查: "
+            f"1) 该环境变量是否真的传到了本进程; "
+            f"2) 当前安装的 deep_ep 是否由本仓库代码编译 (分层需要 CANN >= 9.2.0); "
+            f"3) 芯片是否被识别为 A3 (Ascend910_93)。"
+        )
 
     assert num_experts % num_ranks == 0 and num_nodes >= 2
     assert num_tokens <= MAX_BATCH_SIZE
