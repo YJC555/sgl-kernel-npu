@@ -81,16 +81,13 @@ public:
         return (GM_ADDR)relation->windowsOut;
 #endif
     }
+#ifdef __DAV_C310__
     __aicore__ inline AscendC::ChannelHandle GetChannel(uint32_t dstRank) const
     {
-#ifdef __DAV_C310__
         const uint32_t peerIndex = dstRank < rankId_ ? dstRank : dstRank - 1U;
         return static_cast<AscendC::ChannelHandle>(rdmaContext_->hcommHandle[peerIndex]);
-#else
-        (void)dstRank;
-        return 0U;
-#endif
     }
+#endif
 
     // Runtime initialization guarantees the WQE and memory ABI. Callers own
     // one destination rank/QP per AIV during the full submission phase.
