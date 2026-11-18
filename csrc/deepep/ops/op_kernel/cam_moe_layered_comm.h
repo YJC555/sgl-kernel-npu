@@ -126,7 +126,7 @@ public:
             (__gm__ MemDetails1 *)(remoteMem->memDetailPtr +
                                    remoteMem->sizeOfMemDetails * static_cast<uint32_t>(HcclAiRMAMemType::REMOTE_INPUT));
         *(__gm__ uint32_t *)(wqe + 20U) = remoteKey->key;
-        *(__gm__ uint64_t *)(wqe + 24U) = static_cast<uint64_t>(dst);
+        *(__gm__ uint64_t *)(wqe + 24U) = reinterpret_cast<uint64_t>(dst);
         auto *sge = wqe + sizeof(hns_roce_rc_sq_wqe);
         *(__gm__ uint32_t *)(sge) = bytes;
         auto *localMem =
@@ -135,7 +135,7 @@ public:
             (__gm__ MemDetails1 *)(localMem->memDetailPtr +
                                    localMem->sizeOfMemDetails * static_cast<uint32_t>(HcclAiRMAMemType::LOCAL_OUTPUT));
         *(__gm__ uint32_t *)(sge + sizeof(uint32_t)) = localKey->key;
-        *(__gm__ uint64_t *)(sge + 2U * sizeof(uint32_t)) = static_cast<uint64_t>(src);
+        *(__gm__ uint64_t *)(sge + 2U * sizeof(uint32_t)) = reinterpret_cast<uint64_t>(src);
         cacheWriteThrough(wqe, sizeof(hns_roce_rc_sq_wqe) + sizeof(hns_roce_lite_wqe_data_seg));
         AscendC::PipeBarrier<PIPE_ALL>();
         ++head;
