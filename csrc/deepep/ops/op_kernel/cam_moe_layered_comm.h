@@ -12,6 +12,8 @@
 
 namespace CamMoeLayered {
 
+using namespace AscendC;
+
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()
 {
