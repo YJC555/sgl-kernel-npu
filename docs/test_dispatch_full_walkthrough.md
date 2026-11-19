@@ -433,6 +433,17 @@ experts_per_rank = num_experts // num_ranks     # 8 // 2 = 4
 rank = expert_id // experts_per_rank            # 0~3→rank0，4~7→rank1
 ```
 
+> **专家号是全局唯一的**：整个 EP 组只有 8 个专家，rank0 拥有 0~3，rank1 拥有 4~7，不存在“rank1 的专家 0”。“rank1 的 local 0”是全局专家 4。
+>
+> 每个 rank 的 `expandXOut` 只装自己的本地专家，两块 buffer 互不混排：
+>
+> ```
+> rank0.expandXOut:  [ 全局0 | 全局1 | 全局2 | 全局3 ]
+> rank1.expandXOut:  [ 全局4 | 全局5 | 全局6 | 全局7 ]
+> ```
+>
+> 另注意命名坑：`expert_global_offset` 的 “global” 指“该专家在本 rank 输出行中的全局偏移”，下标是 **local id**（长度 4）；窗口写侧的 `sendOffset` 才用**全局专家号**（长度 8）。
+
 **rank0 的 topk_idx**
 
 | token | topk_idx | 归属 |
