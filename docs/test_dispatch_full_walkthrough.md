@@ -422,25 +422,118 @@ rankGM = shareGM + 512 × 6
 
 ### 9.5 重排（本 rank 接收侧）
 
-`ShareToOutputLongSeq` 按专家顺序遍历：本地专家 0~3，每个专家内再按源 rank、轮次排列。假设 rank1 也向 rank0 的专家 0 和专家 2 各发了 1 条，则 rank0 的 `expandXOut` 行序为：
+`ShareToOutputLongSeq`（L719-762）**不做排序**，它只是把 notify 预先算好的三张偏移表相加，再按固定顺序遍历：`i = local_e*epRankSize + fromRank`，所以顺序天然是 **本地专家 → 源 rank → 轮次 → 该来源内的第 j 条**。
+
+下面用完整数据推一遍。先补齐输入（原示例只给了 rank0 的 `topk_idx`，缺 rank1 的表，导致结果看起来凭空出现）。
+
+**归属规则**（`test_intranode.py` L81、L164）：
+
+```python
+experts_per_rank = num_experts // num_ranks     # 8 // 2 = 4
+rank = expert_id // experts_per_rank            # 0~3→rank0，4~7→rank1
+```
+
+**rank0 的 topk_idx**
+
+| token | topk_idx | 归属 |
+|---|---|---|
+| 0 | `[2, 5]` | e2 本地，e5 发 rank1 |
+| 1 | `[0, 7]` | e0 本地，e7 发 rank1 |
+| 2 | `[3, 4]` | e3 本地，e4 发 rank1 |
+| 3 | `[1, 5]` | e1 本地，e5 发 rank1 |
+
+**rank1 的 topk_idx**（手工构造，使其向 rank0 的 e0、e2 各发 1 条）
+
+| token | topk_idx | 归属 |
+|---|---|---|
+| 0 | `[0, 6]` | e0 发 rank0，e6 本地 |
+| 1 | `[7, 2]` | e7 本地，e2 发 rank0 |
+| 2 | `[5, 6]` | 两条都本地 |
+| 3 | `[4, 5]` | 两条都本地 |
+
+> token 编号是 **rank 内局部编号**，rank0.token0 与 rank1.token0 是两个不同 token；跨 rank 唯一定位必须靠 `(rank, token)` 二元组。
+
+#### ① recvCount：rank0 按 (专家, 源rank) 计数
+
+展平下标 `i = local_e*epRankSize + fromRank`：
+
+| i | (专家, 源) | 来自谁 | count |
+|---|---|---|---|
+| 0 | (e0, r0) | rank0.token1 | 1 |
+| 1 | (e0, r1) | rank1.token0 | 1 |
+| 2 | (e1, r0) | rank0.token3 | 1 |
+| 3 | (e1, r1) | 无 | 0 |
+| 4 | (e2, r0) | rank0.token0 | 1 |
+| 5 | (e2, r1) | rank1.token1 | 1 |
+| 6 | (e3, r0) | rank0.token2 | 1 |
+| 7 | (e3, r1) | 无 | 0 |
+
+合计 6 条 → `expandXOut` 6 行。
+
+#### ② 前缀（kernel 用相邻前缀相减得到 count）
 
 ```
-[专家0] ← rank0.token1
-[专家0] ← rank1.tokenX
-[专家1] ← rank0.token3
-[专家2] ← rank0.token0
-[专家2] ← rank1.tokenY
-[专家3] ← rank0.token2
+i:      0  1  2  3  4  5  6  7
+前缀:   1  2  3  3  4  5  6  6
 ```
 
-输出：
+#### ③ 三张偏移表（notify 三个专用核算出）
 
-| 张量 | 形状（本例） |
-|---|---|
-| `expandXOut` | `[recv_tokens, 8]` bf16（行数 = 本地专家收到的总数） |
-| `dynamicScalesOut` | 无（bf16） |
-| `expandIdxOut` | `[recv_tokens, 3]` int32 |
-| `recv_count` | 每专家计数 |
+**expert_global_offset**：每专家总接收量 → 专家维前缀
+
+```
+e0=2, e1=1, e2=2, e3=1  →  [0, 2, 3, 5]   （0+2+1+2+1 = 6）
+```
+
+**srcrank_in_expert_offset**：专家内按源 rank 前缀
+
+```
+e0: [0,1]  e1: [0,1]  e2: [0,1]  e3: [0,1]  →  [0,1, 0,1, 0,1, 0,1]
+```
+
+**r_in_srcrank_offset**：仅 1 轮 → 全 0。
+
+#### ④ 三数相加得行号
+
+`writeOffset = expert_global_offset[local_e] + srcrank_in_expert_offset[i] + r_in_srcrank_offset[i]`
+
+| i | 专家起点 | 段内偏移 | 轮次 | **writeOffset** | 内容 |
+|---|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | **0** | e0 ← rank0.token1 |
+| 1 | 0 | 1 | 0 | **1** | e0 ← rank1.token0 |
+| 2 | 2 | 0 | 0 | **2** | e1 ← rank0.token3 |
+| 3 | — | — | — | 跳过（count=0） | — |
+| 4 | 3 | 0 | 0 | **3** | e2 ← rank0.token0 |
+| 5 | 3 | 1 | 0 | **4** | e2 ← rank1.token1 |
+| 6 | 5 | 0 | 0 | **5** | e3 ← rank0.token2 |
+| 7 | — | — | — | 跳过（count=0） | — |
+
+#### ⑤ 最终产物
+
+| 行号 | 专家 | 数据来源 | `expandIdxOut` 三元组 (源rank, 源token, k) |
+|---|---|---|---|
+| 0 | e0 | rank0.token1 | `(0, 1, 0)` |
+| 1 | e0 | rank1.token0 | `(1, 0, 0)` |
+| 2 | e1 | rank0.token3 | `(0, 3, 0)` |
+| 3 | e2 | rank0.token0 | `(0, 0, 0)` |
+| 4 | e2 | rank1.token1 | `(1, 1, 1)` |
+| 5 | e3 | rank0.token2 | `(0, 2, 0)` |
+
+| 张量 | 形状（本例） | 说明 |
+|---|---|---|
+| `expandXOut` | `[6, 8]` bf16 | 本地专家收到的总数决定行数 |
+| `dynamicScalesOut` | 无（bf16） | 量化时才有 |
+| `expandIdxOut` | `[6, 3]` int32 | 逆置换表，combine 用 |
+| `recv_count` | `[round, 8]` | 每 (专家,源rank) 计数 |
+
+#### 重排的目的
+
+1. **完成 token-major → expert-major 的转置。** MoE 的 FFN 是按专家分组计算的，`expandXOut` 必须把“同一专家的 token”放在连续行，否则专家 GEMM 前还要再 gather 一次。
+2. **让每个专家有可直接切片的连续段。** 专家 e 的数据就是 `expandXOut[expertGlobalOffset[e] : +total[e]]`，下游 `grouped_matmul` 按这个区间取指针即可，零额外索引计算。
+3. **与 `num_tokens_per_expert` 一一对应。** 段边界即专家 token 数，可直接用于核间任务划分与负载均衡。
+4. **同专家内按源 rank 分段，给 combine 留反查锚点。** `srcrank_in_expert_offset` 让 combine 能按“哪个 rank 发来的”整段回送，不必逐条查表。
+5. **轮次放最内层，保证长序列多轮时顺序稳定。** round 0 的行全部排在 round 1 之前，combine 反向拼回时不需跨轮重排。
+6. **`expandIdxOut` 保存逆置换。** 三元组 `(源rank, 源token, k)` 让 combine 能把专家输出精确送回原 token 的原 topk 槽位，这是“可逆”的关键。
 
 ---
 
