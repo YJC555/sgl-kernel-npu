@@ -1021,29 +1021,34 @@ extern "C" __global__ __aicore__ void cam_moe_dispatch_normal_layered(GM_ADDR ro
 {
     REGISTER_TILING_DEFAULT(CamMoeDispatchNormalLayeredTilingData);
     TPipe pipe;
+    // Must match SetTilingKey(13000U) in cam_moe_dispatch_normal_layered_tiling.cc.
+    // Declaring the key here is what makes the op compiler emit the _13000
+    // funcEntry; without it only the default key-0 entry is generated.
+    if (TILING_KEY_IS(13000)) {
 #if (ORIG_DTYPE_X == DT_BF16 || ORIG_DTYPE_X == DT_FLOAT16)
-    GET_TILING_DATA_WITH_STRUCT(CamMoeDispatchNormalLayeredTilingData, data, tiling);
-    TBuf rdmaUb;
-    pipe.InitBuffer(rdmaUb, 32U);
-    TBuf copyUb;
-    pipe.InitBuffer(copyUb, kPeerCopyTileBytes);
+        GET_TILING_DATA_WITH_STRUCT(CamMoeDispatchNormalLayeredTilingData, data, tiling);
+        TBuf rdmaUb;
+        pipe.InitBuffer(rdmaUb, 32U);
+        TBuf copyUb;
+        pipe.InitBuffer(copyUb, kPeerCopyTileBytes);
 #ifdef __DAV_C310__
-    TBuf hcommUb;
-    pipe.InitBuffer(hcommUb, HCOMM_UB_BUF_SIZE);
+        TBuf hcommUb;
+        pipe.InitBuffer(hcommUb, HCOMM_UB_BUF_SIZE);
 #endif
-    auto doorbellUb = rdmaUb.GetWithOffset<uint64_t>(1U, 0U);
-    auto headUb = rdmaUb.GetWithOffset<uint32_t>(1U, 16U);
-    auto copyTensor = copyUb.Get<uint8_t>();
+        auto doorbellUb = rdmaUb.GetWithOffset<uint64_t>(1U, 0U);
+        auto headUb = rdmaUb.GetWithOffset<uint32_t>(1U, 16U);
+        auto copyTensor = copyUb.Get<uint8_t>();
 #ifdef __DAV_C310__
-    auto hcommTensor = hcommUb.Get<uint8_t>();
+        auto hcommTensor = hcommUb.Get<uint8_t>();
 #else
-    auto hcommTensor = copyTensor;
+        auto hcommTensor = copyTensor;
 #endif
-    CamMoeDispatchNormalLayered<DTYPE_X> op;
-    op.Init(roceContext, x, topkWeights, topkIdx, layeredPlan, recvX, recvTopkIdx, recvTopkWeights, workspace,
-            data.layered, doorbellUb, headUb, copyTensor, hcommTensor);
-    op.Process();
+        CamMoeDispatchNormalLayered<DTYPE_X> op;
+        op.Init(roceContext, x, topkWeights, topkIdx, layeredPlan, recvX, recvTopkIdx, recvTopkWeights, workspace,
+                data.layered, doorbellUb, headUb, copyTensor, hcommTensor);
+        op.Process();
 #endif
+    }
 }
 
 #endif  // DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION

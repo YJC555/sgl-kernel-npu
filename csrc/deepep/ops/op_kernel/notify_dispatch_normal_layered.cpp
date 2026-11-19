@@ -1020,39 +1020,44 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
                                                                      GM_ADDR tiling)
 {
     REGISTER_TILING_DEFAULT(NotifyDispatchNormalLayeredTilingData);
-    GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
-    TPipe pipe;
+    // Must match SetTilingKey(23U) in notify_dispatch_normal_layered_tiling.cc.
+    // Declaring the key here is what makes the op compiler emit the _23
+    // funcEntry; without it only the default key-0 entry is generated.
+    if (TILING_KEY_IS(23)) {
+        GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
+        TPipe pipe;
 #ifdef __DAV_C310__
-    TBuf hcommUb;
-    pipe.InitBuffer(hcommUb, kHcommUbBytes);
+        TBuf hcommUb;
+        pipe.InitBuffer(hcommUb, kHcommUbBytes);
 #endif
-    TBuf rdmaUb;
-    pipe.InitBuffer(rdmaUb, 32U);
-    TBuf sharedWorkUb;
-    pipe.InitBuffer(sharedWorkUb, kSharedWorkUbBytes);
-    auto doorbell = rdmaUb.GetWithOffset<uint64_t>(1U, 0U);
-    auto head = rdmaUb.GetWithOffset<uint32_t>(1U, 16U);
-    // Reduction owns both halves; prefix construction reuses the second half
-    // after reduction, with the first half as its copy-in scratch space.
-    auto initTensor = sharedWorkUb.GetWithOffset<int32_t>(kInitTileElements, 0U);
-    auto reduceSrcTensor = sharedWorkUb.GetWithOffset<int32_t>(kReduceTileElements, 0U);
-    auto reduceAccTensor = sharedWorkUb.GetWithOffset<int32_t>(kReduceTileElements, kReduceTileBytes);
-    auto aggregateCopyTensor = sharedWorkUb.GetWithOffset<uint8_t>(kAggregateCopyTileBytes, 0U);
-    auto expertPrefixTensor = sharedWorkUb.GetWithOffset<int32_t>(kMaxPrefixExperts, kReduceTileBytes);
-    auto packetPrefixTensor =
-        sharedWorkUb.GetWithOffset<int32_t>(kMaxPrefixServers, kReduceTileBytes + kExpertPrefixBytes);
-    auto memberPrefixTensor = sharedWorkUb.GetWithOffset<int32_t>(
-        kMaxPrefixServers, kReduceTileBytes + kExpertPrefixBytes + kServerPrefixBytes);
+        TBuf rdmaUb;
+        pipe.InitBuffer(rdmaUb, 32U);
+        TBuf sharedWorkUb;
+        pipe.InitBuffer(sharedWorkUb, kSharedWorkUbBytes);
+        auto doorbell = rdmaUb.GetWithOffset<uint64_t>(1U, 0U);
+        auto head = rdmaUb.GetWithOffset<uint32_t>(1U, 16U);
+        // Reduction owns both halves; prefix construction reuses the second half
+        // after reduction, with the first half as its copy-in scratch space.
+        auto initTensor = sharedWorkUb.GetWithOffset<int32_t>(kInitTileElements, 0U);
+        auto reduceSrcTensor = sharedWorkUb.GetWithOffset<int32_t>(kReduceTileElements, 0U);
+        auto reduceAccTensor = sharedWorkUb.GetWithOffset<int32_t>(kReduceTileElements, kReduceTileBytes);
+        auto aggregateCopyTensor = sharedWorkUb.GetWithOffset<uint8_t>(kAggregateCopyTileBytes, 0U);
+        auto expertPrefixTensor = sharedWorkUb.GetWithOffset<int32_t>(kMaxPrefixExperts, kReduceTileBytes);
+        auto packetPrefixTensor =
+            sharedWorkUb.GetWithOffset<int32_t>(kMaxPrefixServers, kReduceTileBytes + kExpertPrefixBytes);
+        auto memberPrefixTensor = sharedWorkUb.GetWithOffset<int32_t>(
+            kMaxPrefixServers, kReduceTileBytes + kExpertPrefixBytes + kServerPrefixBytes);
 #ifdef __DAV_C310__
-    auto hcommTensor = hcommUb.Get<uint8_t>();
+        auto hcommTensor = hcommUb.Get<uint8_t>();
 #else
-    auto hcommTensor = aggregateCopyTensor;
+        auto hcommTensor = aggregateCopyTensor;
 #endif
-    NotifyDispatchNormalLayered op;
-    op.Init(roceContext, topkIdx, layeredPlan, recvTokensPerExpert, expertTotalCount, workspace, data.layered, doorbell,
-            head, initTensor, reduceSrcTensor, reduceAccTensor, aggregateCopyTensor, hcommTensor, packetPrefixTensor,
-            memberPrefixTensor, expertPrefixTensor);
-    op.Process();
+        NotifyDispatchNormalLayered op;
+        op.Init(roceContext, topkIdx, layeredPlan, recvTokensPerExpert, expertTotalCount, workspace, data.layered,
+                doorbell, head, initTensor, reduceSrcTensor, reduceAccTensor, aggregateCopyTensor, hcommTensor,
+                packetPrefixTensor, memberPrefixTensor, expertPrefixTensor);
+        op.Process();
+    }
 }
 
 #endif  // DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION

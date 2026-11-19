@@ -691,48 +691,54 @@ extern "C" __global__ __aicore__ void cam_moe_combine_normal_layered(GM_ADDR roc
 {
     REGISTER_TILING_DEFAULT(CamMoeCombineNormalLayeredTilingData);
     TPipe pipe;
+    // Must match SetTilingKey(13000U) in cam_moe_combine_normal_layered_tiling.cc.
+    // Declaring the key here is what makes the op compiler emit the _13000
+    // funcEntry; without it only the default key-0 entry is generated.
+    if (TILING_KEY_IS(13000)) {
 #if (ORIG_DTYPE_RECV_X == DT_BF16 || ORIG_DTYPE_RECV_X == DT_FLOAT16)
-    GET_TILING_DATA_WITH_STRUCT(CamMoeCombineNormalLayeredTilingData, data, tiling);
-    TBuf rdmaUb;
-    pipe.InitBuffer(rdmaUb, 32U);
-    TBuf copyUb;
-    const uint32_t localExperts = data.layered.moeExpertNum / data.layered.epWorldSize;
-    const uint32_t expertBasesUbBytes = static_cast<uint32_t>(CombineExpertBasesUbBytes(localExperts));
-    pipe.InitBuffer(copyUb, expertBasesUbBytes + kCopyTileBytes);
-    TBuf progressUb;
-    const uint32_t workers = data.layered.aivNum > data.layered.serverNum ? data.layered.aivNum - data.layered.serverNum
-                                                                          : data.layered.aivNum;
-    const uint32_t progressBytes = data.layered.serverNum * workers * kProgressStride;
-    pipe.InitBuffer(progressUb, progressBytes);
-    TBuf partialUb;
-    pipe.InitBuffer(partialUb, CombinePartialUbBytes(data.layered.h));
-    TBuf weightedUb;
-    pipe.InitBuffer(weightedUb, CombinePartialUbBytes(data.layered.h));
-    TBuf ownerRowUb;
-    pipe.InitBuffer(ownerRowUb, CombineOwnerRowUbBytes(data.layered.h, sizeof(DTYPE_RECV_X)));
+        GET_TILING_DATA_WITH_STRUCT(CamMoeCombineNormalLayeredTilingData, data, tiling);
+        TBuf rdmaUb;
+        pipe.InitBuffer(rdmaUb, 32U);
+        TBuf copyUb;
+        const uint32_t localExperts = data.layered.moeExpertNum / data.layered.epWorldSize;
+        const uint32_t expertBasesUbBytes = static_cast<uint32_t>(CombineExpertBasesUbBytes(localExperts));
+        pipe.InitBuffer(copyUb, expertBasesUbBytes + kCopyTileBytes);
+        TBuf progressUb;
+        const uint32_t workers = data.layered.aivNum > data.layered.serverNum
+                                     ? data.layered.aivNum - data.layered.serverNum
+                                     : data.layered.aivNum;
+        const uint32_t progressBytes = data.layered.serverNum * workers * kProgressStride;
+        pipe.InitBuffer(progressUb, progressBytes);
+        TBuf partialUb;
+        pipe.InitBuffer(partialUb, CombinePartialUbBytes(data.layered.h));
+        TBuf weightedUb;
+        pipe.InitBuffer(weightedUb, CombinePartialUbBytes(data.layered.h));
+        TBuf ownerRowUb;
+        pipe.InitBuffer(ownerRowUb, CombineOwnerRowUbBytes(data.layered.h, sizeof(DTYPE_RECV_X)));
 #ifdef __DAV_C310__
-    TBuf hcommUb;
-    pipe.InitBuffer(hcommUb, HCOMM_UB_BUF_SIZE);
+        TBuf hcommUb;
+        pipe.InitBuffer(hcommUb, HCOMM_UB_BUF_SIZE);
 #endif
-    auto doorbellTensor = rdmaUb.GetWithOffset<uint64_t>(1U, 0U);
-    auto headTensor = rdmaUb.GetWithOffset<uint32_t>(1U, 16U);
-    auto expertBasesTensor = copyUb.GetWithOffset<uint32_t>(localExperts + 1U, 0U);
-    auto copyTensor = copyUb.GetWithOffset<uint8_t>(kCopyTileBytes, expertBasesUbBytes);
-    auto progressTensor = progressUb.Get<uint32_t>();
-    auto partialTensor = partialUb.Get<float>();
-    auto weightedTensor = weightedUb.Get<float>();
-    auto ownerRowTensor = ownerRowUb.Get<DTYPE_RECV_X>();
+        auto doorbellTensor = rdmaUb.GetWithOffset<uint64_t>(1U, 0U);
+        auto headTensor = rdmaUb.GetWithOffset<uint32_t>(1U, 16U);
+        auto expertBasesTensor = copyUb.GetWithOffset<uint32_t>(localExperts + 1U, 0U);
+        auto copyTensor = copyUb.GetWithOffset<uint8_t>(kCopyTileBytes, expertBasesUbBytes);
+        auto progressTensor = progressUb.Get<uint32_t>();
+        auto partialTensor = partialUb.Get<float>();
+        auto weightedTensor = weightedUb.Get<float>();
+        auto ownerRowTensor = ownerRowUb.Get<DTYPE_RECV_X>();
 #ifdef __DAV_C310__
-    auto hcommTensor = hcommUb.Get<uint8_t>();
+        auto hcommTensor = hcommUb.Get<uint8_t>();
 #else
-    auto hcommTensor = copyTensor;
+        auto hcommTensor = copyTensor;
 #endif
-    CamMoeCombineNormalLayered<DTYPE_RECV_X> op;
-    op.Init(roceContext, recvX, layeredPlan, xOut, workspace, data.layered, data.ownerCapacity, data.chunkPackets,
-            doorbellTensor, headTensor, expertBasesTensor, copyTensor, progressTensor, partialTensor, weightedTensor,
-            ownerRowTensor, hcommTensor);
-    op.Process();
+        CamMoeCombineNormalLayered<DTYPE_RECV_X> op;
+        op.Init(roceContext, recvX, layeredPlan, xOut, workspace, data.layered, data.ownerCapacity,
+                data.chunkPackets, doorbellTensor, headTensor, expertBasesTensor, copyTensor, progressTensor,
+                partialTensor, weightedTensor, ownerRowTensor, hcommTensor);
+        op.Process();
 #endif
+    }
 }
 
 #endif  // DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
