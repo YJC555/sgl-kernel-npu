@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sgl-kernel-npu 项目结构通俗解析</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --card:#ffffff; --ink:#1b1f2a; --sub:#5d6577;
+    --line:#e3e7f0; --brand:#3b5bdb; --brand-soft:#eef2ff;
+    --a2:#b45309; --a2bg:#fff7ed; --a3:#0e7490; --a3bg:#ecfeff;
+    --a5:#7c3aed; --a5bg:#f5f3ff; --common:#475569; --commonbg:#f1f5f9;
+    --code:#f4f6fa;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65; font-size:15px;
+  }
+  header{
+    position:sticky; top:0; z-index:20; backdrop-filter:blur(8px);
+    background:rgba(255,255,255,.92); border-bottom:1px solid var(--line);
+  }
+  .inner{max-width:1080px; margin:0 auto; padding:0 22px}
+  .head-row{display:flex; align-items:center; gap:14px; padding:12px 0}
+  .head-row h1{font-size:17px; margin:0; white-space:nowrap}
+  .head-row .sub{color:var(--sub); font-size:13px; white-space:nowrap}
+  .search{
+    margin-left:auto; flex:1; max-width:340px; position:relative;
+  }
+  .search input{
+    width:100%; padding:8px 12px 8px 32px; border:1px solid var(--line);
+    border-radius:9px; font-size:14px; outline:none; background:#fff;
+  }
+  .search input:focus{border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-soft)}
+  .search svg{position:absolute; left:10px; top:9px; opacity:.45}
+  .btns{display:flex; gap:8px}
+  .btns button{
+    border:1px solid var(--line); background:#fff; color:var(--sub);
+    padding:7px 12px; border-radius:8px; font-size:13px; cursor:pointer;
+  }
+  .btns button:hover{border-color:var(--brand); color:var(--brand)}
+  main{max-width:1080px; margin:0 auto; padding:26px 22px 80px}
+  .hero{
+    background:linear-gradient(135deg,#eef2ff,#f8faff 60%,#fff);
+    border:1px solid var(--line); border-radius:16px; padding:24px 26px; margin-bottom:24px;
+  }
+  .hero h2{margin:0 0 8px; font-size:22px}
+  .hero p{margin:6px 0; color:var(--sub)}
+  .hero .meta{display:flex; gap:10px; flex-wrap:wrap; margin-top:14px}
+  .pill{
+    font-size:12.5px; padding:4px 10px; border-radius:999px;
+    background:var(--brand-soft); color:var(--brand); border:1px solid #dbe3ff;
+  }
+  h3.sec{
+    font-size:18px; margin:38px 0 6px; padding-left:12px;
+    border-left:4px solid var(--brand);
+  }
+  .sechint{color:var(--sub); font-size:13.5px; margin:0 0 12px 16px}
+  pre.tree{
+    background:#111827; color:#d1d5db; border-radius:12px; padding:16px 18px;
+    overflow:auto; font-size:12.8px; line-height:1.6; margin:14px 0 0;
+    font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;
+  }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; margin:10px 0;
+  }
+  .card .fname{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:13.8px; font-weight:600; color:#111827;
+    word-break:break-all;
+  }
+  .card .desc{color:var(--sub); font-size:14px; margin-top:4px}
+  .card .role{color:var(--ink); font-size:14px; margin-top:6px}
+  .badge{
+    display:inline-block; font-size:11.5px; padding:1px 8px; border-radius:6px;
+    margin-left:8px; vertical-align:middle; font-weight:600;
+  }
+  .b-a2{background:var(--a2bg); color:var(--a2)}
+  .b-a3{background:var(--a3bg); color:var(--a3)}
+  .b-a5{background:var(--a5bg); color:var(--a5)}
+  .b-all{background:var(--commonbg); color:var(--common)}
+  .b-py{background:#ecfdf5; color:#047857}
+  .b-test{background:#fef2f2; color:#b91c1c}
+  details.op{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    margin:10px 0; overflow:hidden;
+  }
+  details.op>summary{
+    cursor:pointer; padding:13px 16px; list-style:none; display:flex; align-items:center;
+    gap:10px; font-weight:600; font-size:14.5px;
+  }
+  details.op>summary::-webkit-details-marker{display:none}
+  details.op>summary::before{
+    content:"▸"; color:var(--brand); font-size:13px;
+    transition:transform .18s ease; display:inline-block;
+  }
+  details.op[open]>summary::before{transform:rotate(90deg)}
+  details.op>summary .fn{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    background:var(--code); padding:2px 8px; border-radius:6px; font-size:13px;
+  }
+  .opbody{padding:2px 18px 16px; border-top:1px dashed var(--line)}
+  .opbody p{margin:9px 0; font-size:14px}
+  .opbody .lbl{color:var(--brand); font-weight:600; margin-right:4px}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .box{background:var(--code); border-radius:9px; padding:10px 12px; font-size:13.4px}
+  .box h4{margin:0 0 6px; font-size:13px; color:var(--sub); font-weight:600}
+  ul.tight{margin:6px 0; padding-left:20px}
+  ul.tight li{margin:3px 0; font-size:14px}
+  table{width:100%; border-collapse:collapse; font-size:13.6px; margin:10px 0; background:#fff}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top}
+  th{background:#f8fafc; font-weight:600; color:#334155}
+  code{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    background:var(--code); padding:1px 5px; border-radius:5px; font-size:13px;
+  }
+  .note{
+    border-left:4px solid #f59e0b; background:#fffbeb; color:#78350f;
+    padding:10px 14px; border-radius:0 9px 9px 0; font-size:13.8px; margin:12px 0;
+  }
+  .flow{
+    background:#0f172a; color:#e2e8f0; border-radius:12px; padding:16px 18px;
+    font-family:ui-monospace,Consolas,monospace; font-size:12.6px; overflow:auto; line-height:1.75;
+  }
+  .flow .c{color:#93c5fd}
+  .hidden{display:none !important}
+  footer{color:var(--sub); font-size:12.5px; text-align:center; padding:30px 0}
+  mark{background:#fde68a; padding:0 2px; border-radius:3px}
+</style>
+</head>
+<body>
+<header>
+  <div class="inner head-row">
+    <h1>sgl-kernel-npu 结构解析</h1>
+    <span class="sub">照着目录读代码</span>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+      </svg>
+      <input id="q" type="text" placeholder="搜索文件名 / 关键词，如 notify、Buffer、A5">
+    </div>
+    <div class="btns">
+      <button id="expandAll">全部展开</button>
+      <button id="collapseAll">全部收起</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <h2>这个仓库到底在做什么</h2>
+    <p>它是 <strong>DeepEP 的昇腾（Ascend NPU）移植版</strong>：给 MoE（混合专家）模型做“把 token 分发给各卡上的专家，再把结果收回来”的通信库。</p>
+    <p>仓库里有两条产品线，别混在一起看：</p>
+    <ul class="tight">
+      <li><strong>DeepEP 线</strong>（<code>python/deep_ep</code> + <code>csrc/deepep</code>）：本文档的重点，做 dispatch / combine / 低延迟 / 融合。</li>
+      <li><strong>通用算子线</strong>（<code>python/sgl_kernel_npu</code>、<code>python/attentions</code>）：RMSNorm、SwiGLU、注意力、FLA、Mamba、采样等推理算子，与 MoE 通信无直接关系。</li>
+    </ul>
+    <div class="meta">
+      <span class="pill">A2 / A3 / A5 三种卡各自有实现</span>
+      <span class="pill">Python 门面 → C++ 桥接 → AscendC 算子</span>
+      <span class="pill">算子卡片可点击展开</span>
+    </div>
+  </section>
+
+  <h3 class="sec">0. 一张图看懂分层</h3>
+  <p class="sechint">从上到下：用户在 Python 里调用，最终落到 NPU 上跑的 kernel。</p>
+  <div class="flow">
+<span class="c">测试脚本</span>            tests/python/deepep/test_intranode.py
+      │  Buffer(...) + buffer.dispatch(...)
+      ▼
+<span class="c">Python 门面</span>          python/deep_ep/deep_ep/buffer.py
+      │  选策略、补 config、解析 quant_mode
+      ▼
+<span class="c">策略实现</span>            python/deep_ep/deep_ep/strategies/*.py
+      │  normal / low_latency / fused
+      ▼
+<span class="c">pybind 绑定</span>          csrc/deepep/pybind_extension.cpp
+      ▼
+<span class="c">C++ 通信上下文</span>       csrc/deepep/deep_ep.cpp
+      │  建拓扑、HCCL 通信域、分层上下文、分张量
+      ▼
+<span class="c">aclnn 接口</span>           csrc/deepep/ops*/op_host/op_api/aclnn_*.cpp
+      │  GetWorkspaceSize → Execute（两段式）
+      ▼
+<span class="c">算子定义 + Tiling</span>    csrc/deepep/ops*/op_host/*.cpp / *_tiling.cc
+      │  OpDef、校验、算参数、选 tiling key
+      ▼
+<span class="c">Kernel</span>              csrc/deepep/ops*/op_kernel/*.cpp / *.h
+         在 AI Core / AIV 上搬数据、算前缀、写窗口
+  </div>
+
+  <h3 class="sec">1. 目录树（只画关键部分）</h3>
+<pre class="tree">sgl-kernel-npu/
+├── README.md                 使用说明、环境变量、测试命令
+├── build.sh                  一键编译（打包算子 + Python 扩展）
+├── CMakeLists.txt            顶层构建入口
+├── docs/                     讲解文档（含本页面）
+├── python/
+│   ├── deep_ep/              ★ DeepEP 的 Python 包
+│   │   ├── setup.py
+│   │   └── deep_ep/
+│   │       ├── __init__.py
+│   │       ├── buffer.py         ← 用户门面
+│   │       ├── ep_strategy.py    ← 策略基类 + 注册表
+│   │       ├── device_info.py    ← 卡型/量化模式
+│   │       ├── utils.py          ← EventOverlap 等工具
+│   │       └── strategies/
+│   │           ├── normal_strategy.py
+│   │           ├── low_latency_strategy.py
+│   │           └── fused_strategy.py
+│   ├── sgl_kernel_npu/       通用推理算子（norm/activation/attention/fla/...）
+│   └── attentions/           注意力封装与通用工具
+├── csrc/deepep/              ★ C++ / AscendC 实现
+│   ├── deep_ep.cpp              ← C++ 通信上下文
+│   ├── pybind_extension.cpp     ← 绑定到 Python
+│   ├── config.hpp / config.cpp  ← Config 结构与常量
+│   ├── ops/                  A3 / A5 构建产物
+│   │   ├── op_host/            算子定义、tiling、aclnn
+│   │   ├── op_kernel/          kernel 实现
+│   │   └── common/, utils/     公共头文件
+│   └── ops2/                 A2 构建产物（同名算子另一套实现）
+└── tests/
+    └── python/
+        ├── deepep/            DeepEP 的功能/性能测试
+        └── sgl_kernel_npu/    通用算子测试</pre>
+
+  <h3 class="sec">2. 顶层文件</h3>
+  <div class="card">
+    <div class="fname">README.md</div>
+    <div class="desc">项目说明：支持的卡型、环境变量（<code>HCCL_BUFFSIZE</code>、<code>DEEP_USE_MODE</code> 等）、如何编译、如何跑测试。</div>
+  </div>
+  <div class="card">
+    <div class="fname">build.sh</div>
+    <div class="desc">构建脚本：先编译 AscendC 算子包（生成 <code>libcust_opapi.so</code> 等），再安装 Python 扩展 <code>deep_ep_cpp</code>。可按卡型选择 <code>ops</code> 或 <code>ops2</code>。</div>
+  </div>
+  <div class="card">
+    <div class="fname">CMakeLists.txt</div>
+    <div class="desc">顶层 CMake：汇总算子目录、公共依赖、Python 扩展目标。</div>
+  </div>
+
+  <h3 class="sec">3. python/deep_ep：用户能感知的入口</h3>
+  <p class="sechint">这一层只做“决策和转发”，真正的通信与搬运都在 C++/kernel 里。</p>
+
+  <details class="op">
+    <summary><span class="fn">python/deep_ep/deep_ep/buffer.py</span><span class="badge b-py">入口</span><span class="badge b-all">最常改</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>用户唯一需要的“句柄”。构造时创建 C++ runtime（拓扑 + HCCL 通信域），并按 <code>DEEP_USE_MODE</code> 一次性建好 normal / low_latency / fused 三套策略；对外暴露 <code>get_dispatch_layout</code>、<code>dispatch</code>、<code>combine</code>、<code>low_latency_dispatch/combine</code>、融合接口。</p>
+      <p><span class="lbl">关键点</span></p>
+      <ul class="tight">
+        <li><code>num_nvl_bytes / num_rdma_bytes</code> 只被保存，<strong>不参与实际分配</strong>；真正的窗口大小由 <code>HCCL_BUFFSIZE</code> 决定。</li>
+        <li><code>get_dispatch_config</code> 对 2/4/8 卡返回 <code>(num_sms, x, 256, 6, 128)</code>；<code>num_sms</code> 后面推出 <code>num_channels = num_sms / 2</code>。</li>
+        <li>真正决定走哪套策略的是构造时的环境变量，而不是每次调用时判断。</li>
+      </ul>
+      <div class="grid">
+        <div class="box"><h4>向上提供</h4>dispatch / combine / layout / 低延迟 / 融合</div>
+        <div class="box"><h4>向下依赖</h4>deep_ep_cpp.Buffer（C++ 实现）+ 策略对象</div>
+      </div>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">python/deep_ep/deep_ep/ep_strategy.py</span><span class="badge b-py">策略</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>定义策略基类与<strong>注册表</strong>，以及 <code>StrategyMap</code>——把环境变量 <code>DEEP_USE_MODE</code> 映射成 (normal 策略, low_latency 策略) 的组合。</p>
+      <table>
+        <tr><th>DEEP_USE_MODE</th><th>normal 策略</th><th>low_latency 策略</th></tr>
+        <tr><td><code>default</code></td><td>default</td><td>default</td></tr>
+        <tr><td><code>alltoall</code></td><td>alltoall</td><td>alltoall</td></tr>
+        <tr><td><code>ops</code></td><td>default</td><td>ops</td></tr>
+      </table>
+      <p><span class="lbl">关键点</span><code>register_*_strategy</code> 装饰器把实现注册进字典，<code>get_*_strategy(name)</code> 按名字取类。新增算法只需加一个带装饰器的类。</p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">strategies/normal_strategy.py</span><span class="badge b-py">策略</span><span class="badge b-all">A2/A3/A5 共用</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>normal 模式的两套实现：<code>DefaultNormalCommStrategy</code>（自定义算子，主力）与 <code>AllToAllNormalCommStrategy</code>（标准集合通信）。</p>
+      <p><span class="lbl">关键点</span></p>
+      <ul class="tight">
+        <li><code>get_num_rdma_ranks() &gt; 1</code> 时走 <code>_internode_dispatch</code>，否则走 <code>_intranode_dispatch</code>——这是“单机/多机”的分叉点。</li>
+        <li>多机分支只支持 BF16/FP16，量化会直接报错。</li>
+        <li>dispatch 返回后组装 <code>handle</code>（8 元组），combine 只真正用到其中 4 项。</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">strategies/low_latency_strategy.py</span><span class="badge b-py">策略</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>低延迟模式实现。<code>default</code> 走 <code>deep_ep_cpp</code> 的 <code>moe_distribute_*_v2</code>；<code>ops</code> 走 torch_npu 自带算子；<code>alltoall</code> 走集合通信。</p>
+      <p><span class="lbl">关键点</span></p>
+      <ul class="tight">
+        <li><code>OpsLowLatencyCommStrategy</code> 会先把输入 padding 到 <code>num_max_dispatch_tokens_per_rank</code>，并维护 <code>x_active_mask</code>。</li>
+        <li><code>comm_alg</code> 支持 <code>hierarchy / fullmesh_v1 / fullmesh_v2 / ccu</code>——这才是“fullmesh”的真实出处。</li>
+        <li>量化模式支持 int8 / mx_fp8 / pertoken_fp8 / mx_fp4（A5 才全支持）。</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">strategies/fused_strategy.py</span><span class="badge b-py">策略</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>把“dispatch + 专家计算 + combine”压进一个融合算子的三种形态：<code>fused_deep_moe</code>、<code>dispatch_ffn_combine</code>、<code>mega_moe</code>。</p>
+      <p><span class="lbl">关键点</span>融合模式跳过 Python 层的来回调度，适合固定形状的 decode 场景；对应 <code>FuseMode</code> 枚举 1/2/3。</p>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="fname">python/deep_ep/deep_ep/utils.py</div>
+    <div class="desc"><code>EventOverlap</code>（把 event 包装成可等待对象）、<code>log_parameters</code>（打印调用参数）、<code>_resolve_quant_mode</code>（把布尔开关查表成量化模式字符串）等通用工具。</div>
+  </div>
+  <div class="card">
+    <div class="fname">python/deep_ep/deep_ep/device_info.py</div>
+    <div class="desc">读取 SoC 型号并查 <code>QUANT_MODE_TABLE</code>：2201 → A2/A3；9301 / 9201 / 3510 → A5。决定“同一份代码在哪种卡上能用哪些量化模式”。</div>
+  </div>
+  <div class="card">
+    <div class="fname">python/deep_ep/deep_ep/strategies/__init__.py</div>
+    <div class="desc">导入三个策略模块，触发所有 <code>@register_*_strategy</code> 装饰器执行——没有这一步，注册表是空的。</div>
+  </div>
+
+  <h3 class="sec">4. csrc/deepep：Python 与算子之间的桥</h3>
+
+  <details class="op">
+    <summary><span class="fn">csrc/deepep/deep_ep.cpp</span><span class="badge b-all">核心</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>C++ 层 <code>Buffer</code> 的实现。构造时确定拓扑（单机 8 卡分组、多机 layered 部署、A5 分层上下文）、拿到 HCCL 通信域名、算好轮次参数；调用时把 Python 传入的张量整理成算子要求的形态，再依次调用 notify / dispatch / combine 的 aclnn 接口。</p>
+      <div class="grid">
+        <div class="box"><h4>构造阶段</h4>rank/device 绑定 · SoC 判断 · HCCL comm name · LayeredCommContext</div>
+        <div class="box"><h4>调用阶段</h4>张量校验 · int64→int32 · 分配中间张量 · 下发算子</div>
+      </div>
+      <p><span class="lbl">关键点</span></p>
+      <ul class="tight">
+        <li><code>get_dispatch_layout</code> 与 <code>intranode_dispatch</code> 是两条独立链路：前者只算布局，不通信。</li>
+        <li><code>num_tokens</code> 不是参数，来自 <code>x.size(0)</code>；<code>num_experts</code> 才是显式业务参数。</li>
+        <li>三个 <code>prefix_matrix</code> 用 <code>at::empty</code> 分配后从未写入，是兼容占位。</li>
+      </ul>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="fname">csrc/deepep/pybind_extension.cpp</div>
+    <div class="desc">pybind11 绑定：把 <code>Buffer</code> 的方法和 <code>Config</code> 暴露给 Python。这里能看到 <code>Config</code> 的默认值（<code>num_sms=20</code> 等）。</div>
+  </div>
+  <div class="card">
+    <div class="fname">csrc/deepep/config.hpp / config.cpp</div>
+    <div class="desc"><code>Config</code> 结构定义与缓冲区大小提示函数。注意本移植版里 <code>get_nvl_buffer_size_hint</code> 基本是空壳，直接返回 hidden 字节数。</div>
+  </div>
+
+  <h3 class="sec">5. AscendC 算子的三层结构（先看这个再读算子）</h3>
+  <p class="sechint">每个算子都由“定义 + tiling + aclnn 封装 + kernel”四部分组成，分布在两个目录。</p>
+  <table>
+    <tr><th>层</th><th>位置</th><th>干什么</th></tr>
+    <tr><td>算子定义</td><td><code>op_host/&lt;op&gt;.cpp</code></td><td>声明输入/输出/属性，注册 SoC 版本，写 InferShape / InferDataType</td></tr>
+    <tr><td>Tiling</td><td><code>op_host/&lt;op&gt;_tiling.cc</code></td><td>host 侧算切分参数、校验显存、算 workspace、选 tiling key</td></tr>
+    <tr><td>aclnn 封装</td><td><code>op_host/op_api/aclnn_&lt;op&gt;.cpp</code></td><td>两段式接口：<code>GetWorkspaceSize</code> 跑 tiling → <code>Execute</code> 下发</td></tr>
+    <tr><td>Kernel 入口</td><td><code>op_kernel/&lt;op&gt;.cpp</code></td><td>按 <code>TILING_KEY_IS</code> 选模板，每核各跑一份</td></tr>
+    <tr><td>Kernel 主体</td><td><code>op_kernel/&lt;op&gt;.h</code></td><td>真正的搬数据、算前缀、写窗口</td></tr>
+    <tr><td>共享 tiling 结构</td><td><code>op_kernel/&lt;op&gt;_tiling.h</code></td><td>host 写、kernel 读的“契约结构体”</td></tr>
+  </table>
+  <div class="note">
+    <strong>A2 与 A3/A5 的关系：</strong><code>ops/</code> 编译给 A3/A5（部分文件用 <code>__DAV_C310__</code> 区分），<code>ops2/</code> 编译给 A2。同名算子往往有两份实现，读代码时先确认自己在哪套构建里。
+  </div>
+
+  <h3 class="sec">6. 算子卡片（A3 / A5，ops/）</h3>
+  <p class="sechint">点击标题展开：作用、输入输出、实现要点、三卡差异。</p>
+
+  <details class="op">
+    <summary><span class="fn">dispatch_layout</span><span class="badge b-a3">A3</span><span class="badge b-a5">A5</span><span class="badge b-a2">A2 有独立版</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>只读 <code>topk_idx</code>，算出三张布局表：每个 rank 收多少 token、每个专家收多少 token、哪些 token 要去哪个 rank。<strong>不通信</strong>，是 dispatch 前的一次“本地统计”。</p>
+      <p><span class="lbl">输入 / 输出</span>输入 <code>topk_idx</code>（int64，形状 <code>[num_tokens, topk]</code>）；输出 5 个 int32 张量（<code>num_tokens_per_rank</code>、<code>num_tokens_per_rdma_rank</code>、<code>num_tokens_per_expert</code>、<code>is_token_in_rank</code> 等）。</p>
+      <p><span class="lbl">实现要点</span></p>
+      <ul class="tight">
+        <li>多核按 token 分片，每个核先统计自己那部分，再用 atomic 累加到全局计数。</li>
+        <li>需要两遍扫描：第一遍计数，第二遍按前缀生成槽号（<code>send_token_idx_small</code>）。</li>
+        <li>A2 版走 <code>dispatch_layout_a2.h</code>，多机时还涉及 <code>serverNum</code> 与稠密槽位。</li>
+      </ul>
+      <p><span class="lbl">文件</span><code>op_host/dispatch_layout.cpp</code>、<code>op_host/dispatch_layout_tiling.cc</code>、<code>op_kernel/dispatch_layout.cpp/.h</code>、<code>op_api/aclnn_dispatch_layout.cpp</code></p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">notify_dispatch</span><span class="badge b-a3">A3</span><span class="badge b-a5">A5</span><span class="badge b-all">元数据交换</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>把“本地各专家要收多少”广播给所有 rank，并据此算出三类偏移表：专家段起点（<code>send_data_offset</code>）、每个 (专家, 源rank) 的接收起点、以及轮次偏移。它<strong>只搬元数据，不搬 token 数据</strong>。</p>
+      <div class="grid">
+        <div class="box"><h4>输出（关键）</h4>
+          <code>send_data_offset</code> · <code>recv_count</code> · <code>recv_offset</code><br>
+          <code>expert_global_offset</code> · <code>srcrank_in_expert_offset</code> · <code>r_in_srcrank_offset</code>
+        </div>
+        <div class="box"><h4>下游谁用</h4>
+          dispatch 用 <code>send_data_offset</code> 定写入槽号；<br>
+          combine / 重排用另三张表定输出行号
+        </div>
+      </div>
+      <p><span class="lbl">实现要点</span>内部按“核的职责”分工：有的核做 all-gather 计数，有的核做前缀和，有的核负责超时等待与状态标记。A3/A5 用 <code>notify_dispatch.h</code>，A5 还有 <code>notify_dispatch_a5.h</code>；分层部署走 <code>notify_dispatch_normal_layered.*</code>。</p>
+      <p><span class="lbl">文件</span><code>op_host/notify_dispatch.cpp</code>、<code>notify_dispatch_tiling.cc</code>、<code>op_kernel/notify_dispatch.cpp/.h</code>、<code>op_api/aclnn_notify_dispatch.cpp</code></p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">cam_moe_dispatch_normal</span><span class="badge b-a3">A3</span><span class="badge b-a5">A5</span><span class="badge b-all">主力算子</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>真正的 token 搬运：把本 rank 的 token 按 topk 结果写进目标 rank 的窗口，再按“专家优先”的布局从各源窗口拉回来，形成 <code>expand_x</code>。</p>
+      <p><span class="lbl">输入 / 输出</span>输入 <code>x</code>、<code>topk_idx</code>，加上 layout 与 notify 的 6 张表；输出 <code>expand_x</code>（重排后的 token）、<code>dynamic_scales</code>（量化 scale）、<code>expand_idx</code>（三元组逆置换表）、<code>recv_count</code> 等。</p>
+      <p><span class="lbl">实现要点</span></p>
+      <ul class="tight">
+        <li>窗口地址 = 基址 + 双缓冲半区 + 保护带偏移 + 槽号 × 512B 槽长。</li>
+        <li>每个 512B 槽内是 <code>[hidden][32B scale][12B 三元组]</code>，三元组记录 <code>(源rank, 源token, k)</code>。</li>
+        <li>输出行号 = 专家段起点 + 专家内按源 rank 的偏移 + 轮次偏移，三张表相加，不做排序。</li>
+        <li>A5 版 <code>cam_moe_dispatch_normal_a5.h</code> 只换了窗口基址与保护带常量；分层部署走 <code>*_layered.*</code>。</li>
+      </ul>
+      <p><span class="lbl">Tiling key</span>13000（无量化）/ 13002（int8）/ A5 的 15000、15002~15005（对应不同 fp8/fp4 模式）。</p>
+      <p><span class="lbl">文件</span><code>op_host/cam_moe_dispatch_normal.cpp</code>、<code>..._tiling.cc</code>、<code>op_kernel/cam_moe_dispatch_normal.cpp/.h/_a5.h</code>、<code>op_api/aclnn_cam_moe_dispatch_normal.cpp</code></p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">cam_moe_combine_normal</span><span class="badge b-a3">A3</span><span class="badge b-a5">A5</span><span class="badge b-all">回程</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>把专家算完的结果按三元组送回原 token：每个 expand 行送回 <code>(源rank, 源token, k)</code> 对应的位置，乘 <code>topk_weights[k]</code> 后累加，得到 <code>combined_x</code>。</p>
+      <p><span class="lbl">实现要点</span></p>
+      <ul class="tight">
+        <li>入口参数很少（x + topk + src_idx + send_head），因为布局信息全在 dispatch 阶段算好了。</li>
+        <li>多轮长序列走 <code>cam_moe_combine_normal_multi_round.h</code>。</li>
+        <li>A5 版 <code>..._a5.h</code> 的差异同样集中在窗口基址与状态区。</li>
+      </ul>
+      <p><span class="lbl">文件</span><code>op_kernel/cam_moe_combine_normal.cpp/.h/_a5.h/_multi_round.h</code>、<code>op_host/cam_moe_combine_normal_tiling.cc</code>、<code>op_api/aclnn_cam_moe_combine_normal.cpp</code></p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">moe_distribute_dispatch_v2 / combine_v2</span><span class="badge b-a3">A3</span><span class="badge b-a5">A5</span><span class="badge b-all">低延迟</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>低延迟模式的 dispatch / combine 实现，面向 decode 场景的小批量、低时延通信。走的是另一套窗口寻址与状态协议，不经过 normal 的三元组表。</p>
+      <p><span class="lbl">实现要点</span></p>
+      <ul class="tight">
+        <li>变体齐全：<code>_a5.h</code>（A5 专项）、<code>_ccu.h</code>（CCU 卸载）、<code>_layered.h</code>（分层部署）、<code>_single.h</code>（单机）。</li>
+        <li>入口文件 <code>moe_low_latency_dispatch_v2.cpp</code> / <code>moe_low_latency_combine_v2.cpp</code>。</li>
+        <li>量化模式由 Python 层先转成整数（0/2/3）再传入。</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">fused_deep_moe</span><span class="badge b-a3">A3</span><span class="badge b-a5">A5</span><span class="badge b-all">融合</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>把 dispatch + 专家 FFN 计算 + combine 合成一个大算子，减少 kernel 启动与中间结果的 GM 往返。</p>
+      <p><span class="lbl">实现要点</span>kernel 主体在 <code>fused_deep_moe_base.h</code>，A5 有专门目录 <code>fused_deep_moe_a5/</code>；tiling 需要额外传入专家权重、量化参数。</p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">dispatch_ffn_combine</span><span class="badge b-all">融合</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>另一种融合形态：dispatch 之后直接接 FFN（两个专家矩阵乘 + 激活），再 combine。适合固定 batch 的推理。</p>
+      <p><span class="lbl">实现要点</span>kernel 主体拆在 <code>dispatch_ffn_combine_kernel/</code> 子目录，按阶段分文件；tiling 结构与普通 dispatch 不同，需要携带 FFN 的 shape 与权重布局。</p>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="fname">op_kernel/common.h / data_copy.h / comm_args.h / sync_collectives.h</div>
+    <div class="desc">公共基础设施：对齐与类型宏、GM↔UB 的 DataCopyPad 封装、通信参数常量、跨核/跨 rank 同步原语。几乎所有 kernel 都间接依赖它们。</div>
+  </div>
+  <div class="card">
+    <div class="fname">op_kernel/check_winsize.h / moe_distribute_base.h / quantize_functions.h</div>
+    <div class="desc">窗口容量自检、低延迟通信基类、量化/反量化函数模板（int8、fp8、fp4 的转换与 scale 处理）。</div>
+  </div>
+  <div class="card">
+    <div class="fname">op_kernel/cam_moe_layered_comm.h / *_layered_tiling.h</div>
+    <div class="desc">分层部署（Layered）专用：多机按 server 分层的通信实现与 tiling 契约。对应环境变量 <code>DEEPEP_LAYERED_RANKS_PER_SERVER</code>、<code>DEEPEP_LAYERED_PROTOCAL</code>（roce / uboe）。</div>
+  </div>
+
+  <h3 class="sec">7. 算子卡片（A2，ops2/）</h3>
+  <p class="sechint">A2 的算子目录结构相同，但实现细节显著不同：窗口偏移固定 210MB、没有 hybrid 分支、多机需要 serverNum。</p>
+
+  <details class="op">
+    <summary><span class="fn">dispatch_layout（ops2）</span><span class="badge b-a2">A2</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>与 A3/A5 版同职责，但 kernel 在 <code>dispatch_layout_a2.h</code> 中实现，多机路径要考虑 server 维度与稠密槽位。</p>
+      <p><span class="lbl">差异</span>tiling key 区间不同（约 23 / 123）；A2 把“专家优先”编号直接放在 GM 上，减少 UB 中转。</p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">notify_dispatch / notify_dispatch_a2</span><span class="badge b-a2">A2</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>A2 的元数据交换。除了常规计数广播，还要处理 <code>serverNum</code> 维度，并在窗口内划分 notify 专用的 202MB 区域。</p>
+      <p><span class="lbl">实现要点</span><code>notify_dispatch_a2.cpp/.h</code> 是 A2 专项实现；tiling 在 <code>notify_dispatch_tiling_a2.cc</code>；aclnn 入口 <code>aclnn_notify_dispatch_a2.cpp</code>。</p>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">cam_moe_dispatch_normal（ops2） / dispatch_normal_a2</span><span class="badge b-a2">A2</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>A2 的 token 搬运主体。</p>
+      <p><span class="lbl">关键差异</span></p>
+      <ul class="tight">
+        <li>窗口基址：<code>GetWindowsInAddr</code> + <code>8MB</code> + <code>202MB</code>，无 hybrid 判断。</li>
+        <li>双缓冲半区 = <code>(总窗口 - 8MB) / 2</code>；状态区在窗口末尾。</li>
+        <li>槽号计算与 A3/A5 相同：<code>sendOffset[专家] + 段内序号</code>。</li>
+        <li><code>dispatch_normal_a2.cpp</code> 是另一条多机路径，支持 layered 变体。</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="op">
+    <summary><span class="fn">cam_moe_combine_normal（ops2） / moe_distribute_combine_a2</span><span class="badge b-a2">A2</span></summary>
+    <div class="opbody">
+      <p><span class="lbl">作用</span>A2 的回程与低延迟回程。文件与 A3/A5 同名，实现按 A2 的窗口布局改写；<code>moe_distribute_combine_a2_layered.h</code> 支持分层部署。</p>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="fname">ops2/op_host/tiling_args.h / mc2_tiling_utils.h</div>
+    <div class="desc">A2 专用常量与 tiling 工具：<code>COMBINE_STATE_WIN_OFFSET = 8MB</code>、<code>NOTIFY_DISPATCH_BUFF_OFFSET = 202MB</code>，以及窗口大小校验函数。</div>
+  </div>
+
+  <h3 class="sec">8. tests/python/deepep：怎么验证</h3>
+  <div class="card">
+    <div class="fname">test_intranode.py</div>
+    <div class="desc"><span class="badge b-test">主力测试</span>单机 2/4/8 卡 normal 模式：造 topk → 手算 layout 参考值 → 断言 → 跑 dispatch/combine 性能。理解整条链路的最佳入口。</div>
+  </div>
+  <div class="card">
+    <div class="fname">test_internode.py / test_internode_a2.py / test_internode_a3.py</div>
+    <div class="desc">多机场景；A2 版本额外需要设置分层相关环境变量（见 <code>test_internode_a2_set_env.py</code>）。</div>
+  </div>
+  <div class="card">
+    <div class="fname">test_low_latency.py / test_ll_alltoall.py</div>
+    <div class="desc">低延迟 dispatch/combine 的功能与性能；后者对比 low-latency 与 alltoall 两条路径。</div>
+  </div>
+  <div class="card">
+    <div class="fname">test_normal_alltoall.py / test_normal_dc_vs_alltoall.py / test_lowlatency_dc_vs_alltoall.py</div>
+    <div class="desc">normal 的 alltoall 策略测试，以及与 DeepEP 原版（DC）路径的对比。</div>
+  </div>
+  <div class="card">
+    <div class="fname">test_fused_deep_moe*.py / test_dispatch_ffn_combine.py</div>
+    <div class="desc">融合算子测试：A3/A5 各一份，另有 w4a8 精度用例。</div>
+  </div>
+  <div class="card">
+    <div class="fname">test_combine.py / test_mixed_dc_vs_alltoall.py / test_normal_and_low_latency.py / test_performance_compare.py</div>
+    <div class="desc">单算子测试、混合模式、统一性能对比。</div>
+  </div>
+  <div class="card">
+    <div class="fname">utils.py / test_common.py / run_ascend_ci.py</div>
+    <div class="desc">公共工具（<code>inplace_unique</code>、<code>calc_diff</code>、数据生成）、测试基类、CI 批量执行入口。</div>
+  </div>
+
+  <h3 class="sec">9. python/sgl_kernel_npu 与 attentions（通用算子线）</h3>
+  <p class="sechint">这一条线不参与 MoE 通信，按模块归类即可。</p>
+  <table>
+    <tr><th>子模块</th><th>代表文件</th><th>作用</th></tr>
+    <tr><td><code>norm/</code></td><td>rmsnorm_bias、split_qkv_rmsnorm_rope、fused_rope_qk_mqa</td><td>归一化与 QKV 拆分 + RoPE 融合算子</td></tr>
+    <tr><td><code>activation/</code></td><td>swiglu_oai、situ、*_mxfp8_quant</td><td>激活函数及其量化融合版本</td></tr>
+    <tr><td><code>attention/</code></td><td>decode_attention、sinks_attention、gqa_share_sparse_attention</td><td>解码注意力、稀疏/共享 KV 注意力</td></tr>
+    <tr><td><code>fla/</code></td><td>chunk、wy_fast、solve_tril、kda_prefill</td><td>线性注意力（Gated Delta Rule / KDA）系列</td></tr>
+    <tr><td><code>mamba/</code></td><td>causal_conv1d、mamba_state_update_triton</td><td>状态空间模型的卷积与状态更新</td></tr>
+    <tr><td><code>sample/</code></td><td>argmax_softmax_prob、chain_speculative_sampling</td><td>采样与投机解码验证</td></tr>
+    <tr><td><code>moe/</code></td><td>mul_add、zero_experts_compute_identity</td><td>MoE 相关的逐元素小算子</td></tr>
+    <tr><td><code>indexer/</code> / <code>mem_cache/</code> / <code>kimi_k3/</code></td><td>flash_block_score_*、kv_cache_store、attn_residual</td><td>索引打分、KV cache 管理、模型专用融合算子</td></tr>
+    <tr><td><code>attentions/</code></td><td>lib.py、utils/env.py</td><td>注意力封装与平台探测、日志、文件工具</td></tr>
+  </table>
+
+  <h3 class="sec">10. 三卡差异速查</h3>
+  <table>
+    <tr><th>维度</th><th>A2</th><th>A3</th><th>A5</th></tr>
+    <tr><td>构建目录</td><td><code>csrc/deepep/ops2/</code></td><td><code>csrc/deepep/ops/</code></td><td><code>csrc/deepep/ops/</code>（部分文件 <code>__DAV_C310__</code> 分支）</td></tr>
+    <tr><td>窗口基址</td><td><code>GetWindowsInAddr</code> + 210MB 固定偏移</td><td>本地/远端窗口指针 + 106MB 或 107MB+48KB</td><td><code>GetBaseWindAddrByRankId</code> + 106MB 或 107MB+72KB</td></tr>
+    <tr><td>量化支持</td><td>int8</td><td>int8</td><td>int8 / pertoken_fp8 / mx_fp8 / mx_fp4</td></tr>
+    <tr><td>Tiling key</td><td>23 / 123 区间</td><td>13000 / 13002</td><td>15000 / 15002~15005</td></tr>
+    <tr><td>多机协议</td><td>roce / uboe</td><td>仅 roce</td><td>roce / uboe</td></tr>
+    <tr><td>分层部署</td><td><code>*_layered.h</code> 系列</td><td><code>*_layered.*</code> 系列</td><td>同 A3 + <code>_a5</code> 变体</td></tr>
+  </table>
+
+  <h3 class="sec">11. 建议的阅读顺序</h3>
+  <ol>
+    <li><code>README.md</code>：知道怎么编译、怎么跑。</li>
+    <li><code>python/deep_ep/deep_ep/buffer.py</code>：记住对外接口长什么样。</li>
+    <li><code>tests/python/deepep/test_intranode.py</code>：看一次真实调用需要哪些参数。</li>
+    <li><code>python/deep_ep/deep_ep/strategies/normal_strategy.py</code>：看一次调用怎么分叉到 intranode / internode。</li>
+    <li><code>csrc/deepep/deep_ep.cpp</code>：看参数如何变成算子调用。</li>
+    <li><code>op_host/*_tiling.cc</code>：看 host 侧算了什么。</li>
+    <li><code>op_kernel/*.h</code>：最后看搬运与地址计算。</li>
+  </ol>
+
+  <footer>
+    本页由仓库代码静态梳理生成 · 路径以当前工作区为准 · 算子实现细节请以源码为准
+  </footer>
+</main>
+
+<script>
+(function(){
+  const q = document.getElementById('q');
+  const cards = Array.from(document.querySelectorAll('.card, details.op'));
+
+  function applyFilter(){
+    const kw = (q.value || '').trim().toLowerCase();
+    cards.forEach(el => {
+      if(!kw){ el.classList.remove('hidden'); return; }
+      const txt = el.textContent.toLowerCase();
+      el.classList.toggle('hidden', !txt.includes(kw));
+      if(txt.includes(kw) && el.tagName === 'DETAILS'){ el.open = true; }
+    });
+    document.querySelectorAll('h3.sec').forEach(h => {
+      if(!kw){ h.classList.remove('hidden'); return; }
+      let n = h.nextElementSibling, any = false;
+      while(n && n.tagName !== 'H3'){
+        if((n.classList.contains('card') || n.classList.contains('op')) && !n.classList.contains('hidden')) any = true;
+        n = n.nextElementSibling;
+      }
+      h.classList.toggle('hidden', !any);
+    });
+  }
+  q.addEventListener('input', applyFilter);
+
+  document.getElementById('expandAll').addEventListener('click', () => {
+    document.querySelectorAll('details.op').forEach(d => d.open = true);
+  });
+  document.getElementById('collapseAll').addEventListener('click', () => {
+    document.querySelectorAll('details.op').forEach(d => d.open = false);
+  });
+})();
+</script>
+</body>
+</html>
