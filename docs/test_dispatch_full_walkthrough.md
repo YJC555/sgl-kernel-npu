@@ -388,22 +388,37 @@ return self.normal_strategy.dispatch(..., quant_mode=quant_mode)                
 ### 9.4 搬运地址怎么算
 
 ```cpp
-dstExpertId   = expertIdsTensor(tokenIndex)          // 专家号
-curExpertCnt  = sendTokenIdxTensor(tokenIndex)       // 槽号
-dstExpertOffset = sendOffsetTensor(dstExpertId)      // 专家区段起点
-rankGM = shareGM + hOutGMAlignSize * (dstExpertOffset + curExpertCnt)
-DataCopyPad(dstGT, xTmpTensor, ...);
+// 实际代码 L443-450、L472（tokenIndex 是扁平化的 (token,k) 下标）
+uint32_t dstExpertId = expertIdsTensor(tokenIndex - startTokenId);
+if (dstExpertId < 0 || dstExpertId >= moeExpertNum) continue;    // -1 表示 drop
+int32_t curExpertCnt    = sendTokenIdxTensor(tokenIndex - startTokenId);
+int32_t dstExpertOffset = sendOffsetTensor(dstExpertId);         // 无 round 偏移
+GM_ADDR rankGM = (uint8_t *)(shareGM + hOutGMAlignSize * (dstExpertOffset + curExpertCnt));
+dstGT.SetGlobalBuffer((__gm__ ExpandXOutType *)rankGM);
+DataCopyPad(dstGT, xTmpTensor, hCommuCopyOutParams);             // 只搬 hScaleIdxSize 字节
 ```
+
+| 变量 | 来源 | 索引口径 |
+|---|---|---|
+| `tokenIndex` | 核内循环 | 扁平 (token,k)：`token = tokenIndex/topK`，`k = tokenIndex%topK` |
+| `expertIdsTensor` | `topk_idx`（转 int32） | UB 分片，必须减 `startTokenId` |
+| `sendTokenIdxTensor` | layout 的 `send_token_idx_small` | 同上，段内槽号 |
+| `sendOffsetTensor` | notify 的 `send_data_offset` | 长度 = 全局专家数，`sendOffset[e]` = 前 e 个专家槽数前缀和 |
+| `shareGM` | `Init` L289：`GetWindAddrByRankId(COMM_EP_IDX, epRankId)` | **本 rank** 窗口数据区基址（已含 `winDataSizeOffset + dataOffset`） |
+| `hOutGMAlignSize` | `Init` L258 | 单槽步长（512B 对齐） |
 
 代入 idx7：(token=3, k=1)，专家 5，槽号 1，`sendOffset[5]=5`：
 
 ```
-目标地址 = shareGM + hOutGMAlignSize × (5 + 1) = 第 6 行
+槽号 = 5 + 1 = 6
+rankGM = shareGM + 512 × 6
 ```
 
-即 rank1 窗口中"专家 5"区段的第 2 个槽位（从 0 数）。这就是 token「猫」被送到专家 5 的物理位置。
+即「专家 5」区段的第 6 号槽（0-based，也就是该段第 2 个槽、整体第 7 个槽）。
 
-同时写入回程三元组 `(epRankId, tokenIndex, k)`，供 combine 找回原 token。
+**注意写的是发送方自己的窗口**：`shareGM` 用的是 `epRankId`（本卡），所以 rank0 把这 3 份数据（payload + 32B scale + 三元组）写进 **rank0 的窗口**；rank1 作为专家 5 的 owner，稍后通过 `GetWindAddrByRankId(COMM_EP_IDX, fromRank=0)` 从 **rank0 的窗口**按同一偏移读走。
+
+同时 `FillTriple`（L368-375）在槽内写入回程三元组 `(epRankId, roundIndex*perRoundTokens + token/topK, k)`，供 combine 找回原 token。
 
 ### 9.5 重排（本 rank 接收侧）
 
