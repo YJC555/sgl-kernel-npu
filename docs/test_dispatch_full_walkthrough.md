@@ -482,8 +482,15 @@ i:      0  1  2  3  4  5  6  7
 **expert_global_offset**：每专家总接收量 → 专家维前缀
 
 ```
-e0=2, e1=1, e2=2, e3=1  →  [0, 2, 3, 5]   （0+2+1+2+1 = 6）
+e0=2, e1=1, e2=2, e3=1
+expTensor(0) = 0
+expTensor(1) = 0 + 2 = 2
+expTensor(2) = 2 + 1 = 3
+expTensor(3) = 3 + 2 = 5
+→ [0, 2, 3, 5]     长度 = num_local_experts = 4，下标 0~3
 ```
+
+> 表里**没有末尾的总数**。总行数 6 = 2+1+2+1，由 `recvCount` 前缀的最后一项 / `total_recv_token` 给出。写 `[0,2,3,5,6]`（E+1 个元素）是另一种“前缀+总数”形式，代码里不是这样存的。
 
 **srcrank_in_expert_offset**：专家内按源 rank 前缀
 
