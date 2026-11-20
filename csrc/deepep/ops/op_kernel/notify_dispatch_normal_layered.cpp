@@ -37,10 +37,44 @@ static_assert(kExpertPrefixBytes + 2U * kServerPrefixBytes <= kReduceTileBytes);
 static_assert(CACHE_LINE_ISOLATION_BYTES % AscendC::CACHE_LINE_SIZE == 0U,
               "Aggregate owner slices must isolate Ascend C cache lines");
 
+// Debug tracing. The kernel is AIV-only and every stage is separated by a
+// cross-core sync, so one compact marker per stage printed from AIV 0 is
+// enough to name the faulting function: the last marker printed is the stage
+// that faulted, and a marker with no following stage means that stage hung.
+// Compile with -DDEEPEP_LAYERED_DEBUG_LOG=0 to drop every print.
+#ifndef DEEPEP_LAYERED_DEBUG_LOG
+#define DEEPEP_LAYERED_DEBUG_LOG 1
+#endif
+
+#if DEEPEP_LAYERED_DEBUG_LOG
+#define LAYERED_LOG(...) printf(__VA_ARGS__)
+#else
+#define LAYERED_LOG(...) \
+    do {                 \
+    } while (0)
+#endif
+
 class NotifyDispatchNormalLayered
 {
 public:
     __aicore__ inline NotifyDispatchNormalLayered() {}
+
+    // Print the stage id from AIV 0, drain every pipeline of this core and then
+    // converge all cores. Called before each stage, so the marker printed last
+    // identifies the stage that faulted (507035) or hung.
+    __aicore__ inline void StageBoundary(uint32_t stage)
+    {
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] stage %u\n", stage);
+        }
+        PipeBarrier<PIPE_ALL>();
+#else
+        (void)stage;
+#endif
+        SyncAll<true>();
+    }
 
     __aicore__ inline void Init(GM_ADDR roceContext, GM_ADDR topkIdx, GM_ADDR layeredPlan, GM_ADDR recvTokensPerExpert,
                                 GM_ADDR expertTotalCount, GM_ADDR workspace, const CamMoeLayeredInfo &info,
@@ -77,30 +111,61 @@ public:
         countSlicePadded_ = AlignWorkspaceElements(countSlice_);
         packetSlicePadded_ = AlignWorkspaceElements(packetSlice_);
         memberCountSlicePadded_ = packetSlicePadded_;
+#if DEEPEP_LAYERED_DEBUG_LOG
+        if (GetBlockIdx() == 0U) {
+            // Split into short lines: kernel printf has a per-call argument
+            // limit and a small per-core log buffer, so keep each call compact.
+            LAYERED_LOG("[ln] init rank=%u/%u inSrv=%u srv=%u rps=%u ex=%u\n", info_.epRankId, info_.epWorldSize,
+                        info_.rankInServer, info_.serverNum, info_.ranksPerServer, info_.moeExpertNum);
+            LAYERED_LOG("[ln] init aiv=%u bs=%u maxBs=%u slots=%u k=%u h=%u\n", info_.aivNum, info_.bs, info_.maxBs,
+                        info_.slotsPerServer, info_.k, info_.h);
+            // Low 32 bits of every pointer are enough to compare against
+            // tensor.data_ptr() on the host and to spot swapped outputs.
+            LAYERED_LOG("[ln] init gm roce=%x topk=%x recv=%x plan=%x\n",
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(roceContext)),
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(topkIdx)),
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(recv_)),
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(plan_)));
+            LAYERED_LOG("[ln] init gm total=%x ws=%x planElems=%u rnd=%u\n",
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(total_)),
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(workspace_)), info_.planElements,
+                        info_.physicalRounds);
+            LAYERED_LOG("[ln] init off cnt=%u mcnt=%u slot=%u exp=%u leoff=%u lecnt=%u\n", info_.packetCountOffset,
+                        info_.dispatchMemberCountOffset, info_.packetSlotOffset, info_.expertCountOffset,
+                        info_.localExpertOffset, info_.localExpertCountOffset);
+        }
+#endif
     }
 
     __aicore__ inline void Process()
     {
-        Cleanup();
-        SyncAll<true>();
+        StageBoundary(1);
+        Cleanup();  // 清零 plan 普通元数据与各 AIV 私有计数片
+        StageBoundary(2);
         InitPlanHeader();  // 初始化 plan 信息和状态（AIV 0）
-        SyncAll<true>();
+        StageBoundary(3);
         BuildLocalRoutePlanParallel();  // 根据 topk_idx 构建本地路由关系
-        SyncAll<true>();
+        StageBoundary(4);
         ReduceLocalCounts();  // 合并多 AIV 计数
-        SyncAll<true>();
+        StageBoundary(5);
         PlanOutboundPayloads();  // 记录本地token按照server重排的偏移和大小
-        SyncAll<true>();
-        PublishCountControls();         // server间发送给同号卡
-        AggregateServerCounts();        // 本地rank重排并转发给server内其他rank
+        StageBoundary(6);
+        PublishCountControls();  // server间发送给同号卡
+        StageBoundary(7);
+        AggregateServerCounts();  // 本地rank重排并转发给server内其他rank
+        StageBoundary(8);
         ApplyProxyAggregatesToOwner();  // 等待数据到达，本地按照专家重排，记录recv_x
-        SyncAll<true>();
+        StageBoundary(9);
         FanoutBaseAckSlicesToProxies();  // 将计算好的行号发送给本地proxy
-        WaitAllBaseAckSlices();          // 等待所有的本地rank收齐
-        SyncAll<true>();
-        AssembleBaseAcksAtProxies();   // inbuffer搬到outbuffer
+        StageBoundary(10);
+        WaitAllBaseAckSlices();  // 等待所有的本地rank收齐
+        StageBoundary(11);
+        AssembleBaseAcksAtProxies();  // inbuffer搬到outbuffer
+        StageBoundary(12);
         PublishBaseAcksFromProxies();  // 直接rdma发送，不需要重排
-        ApplyAllReturnedRowBases();    // 等待数据收齐，并回填每个member的行号
+        StageBoundary(13);
+        ApplyAllReturnedRowBases();  // 等待数据收齐，并回填每个member的行号
+        StageBoundary(14);           // 整个接收计划已完成
     }
 
 private:
@@ -354,6 +419,12 @@ private:
         const uint32_t memberScratch = info_.serverNum * descStride;
         const uint32_t memberScratchStride = CamMoeLayered::AlignUp(MemberElements(), kUbCopyAlignmentElements);
         const uint32_t packetSlotScratch = memberScratch + memberScratchStride;
+#if DEEPEP_LAYERED_DEBUG_LOG
+        if (aiv == 0U) {
+            LAYERED_LOG("[ln] route aiv=%u tok=%u..%u dstride=%u mscratch=%u sscratch=%u\n", aiv, begin, end,
+                        descStride, memberScratch, packetSlotScratch);
+        }
+#endif
         for (uint32_t token = begin; token < end; ++token) {
             for (uint32_t target = 0U; target < info_.serverNum; ++target) {
                 const uint32_t desc = descScratch + target * descStride;
@@ -370,6 +441,13 @@ private:
                     continue;
                 }
                 const uint32_t expertId = static_cast<uint32_t>(expert);
+                // topk_idx is device input. An id outside [0, moeExpertNum) is
+                // not a valid expert: using it would index past the per-server
+                // UB descriptor scratch (packetSlotScratch + target) and past
+                // rows of the per-expert counter slice in GM.
+                if (expertId >= info_.moeExpertNum) {
+                    continue;
+                }
                 const uint32_t target = expertId / expertsPerServer_;  // 目标server
                 // 每个 token/server 只占一个 packet。
                 const uint32_t packet = target * info_.slotsPerServer + token;
@@ -452,6 +530,12 @@ private:
                     static_cast<uint64_t>(n) * (countSlicePadded_ + packetSlicePadded_), memberCountSlicePadded_, aiv);
         BuildPrefix(*expertPrefixUb_, expertElements, 0U, countSlicePadded_, aiv);
         SyncFunc<HardEvent::V_S>();
+#if DEEPEP_LAYERED_DEBUG_LOG
+        if (aiv == 0U) {
+            LAYERED_LOG("[ln] reduce pkt=%u exp=%u tok=%u..%u aiv=%u cslice=%u\n", packetElements, expertElements,
+                        begin, end, n, countSlicePadded_);
+        }
+#endif
 
         for (uint32_t token = begin; token < end; ++token) {
             for (uint32_t target = 0; target < info_.serverNum; ++target) {
@@ -459,6 +543,13 @@ private:
                 CopyPlanToUb(info_.packetDescOffset + packet * PacketElements(), *initUb_, sizeof(SourcePacketDesc));
                 const uint32_t memberCount = static_cast<uint32_t>(initUb_->GetValue(2U));
                 if (memberCount == 0) {
+                    continue;
+                }
+                // One token can contribute at most k members to a packet. A
+                // larger value means the descriptor does not belong to this
+                // invocation; copying that many bytes would overrun initUb_ and
+                // then fault on a scalar UB read inside the member loop.
+                if (memberCount > info_.k) {
                     continue;
                 }
                 initUb_->SetValue(1U, initUb_->GetValue(1U) +
@@ -474,7 +565,11 @@ private:
                     const uint32_t memberUbOffset = m * MemberElements();
                     const uint32_t expert = static_cast<uint32_t>(initUb_->GetValue(memberUbOffset));
                     const int32_t localRow = initUb_->GetValue(memberUbOffset + 1U);
-                    initUb_->SetValue(memberUbOffset + 1U, localRow + expertPrefixUb_->GetValue(expert));
+                    // expertPrefixUb_ only holds moeExpertNum entries. Clamp a
+                    // member descriptor that carries an out-of-range id instead
+                    // of reading past the end of the UB prefix table.
+                    const uint32_t expertIndex = expert < info_.moeExpertNum ? expert : 0U;
+                    initUb_->SetValue(memberUbOffset + 1U, localRow + expertPrefixUb_->GetValue(expertIndex));
                 }
                 CopyUbToPlan(memberOffset, *initUb_, memberBytes);
             }
@@ -488,6 +583,9 @@ private:
         if (GetBlockIdx() != 0U) {
             return;
         }
+#if DEEPEP_LAYERED_DEBUG_LOG
+        LAYERED_LOG("[ln] outbound srv=%u stride=%u\n", info_.serverNum, info_.recordStride);
+#endif
         cacheReadInvalidate(reinterpret_cast<__gm__ uint8_t *>(plan_ + info_.packetCountOffset),
                             static_cast<uint64_t>(info_.serverNum) * sizeof(int32_t));
         cacheReadInvalidate(reinterpret_cast<__gm__ uint8_t *>(plan_ + info_.dispatchMemberCountOffset),
@@ -741,6 +839,9 @@ private:
                 ownerRows += static_cast<uint32_t>(running);
                 physicalOffset += static_cast<int32_t>(alignedRows);
             }
+#if DEEPEP_LAYERED_DEBUG_LOG
+            LAYERED_LOG("[ln] owner rows=%u phys=%d lexp=%u\n", ownerRows, physicalOffset, localExperts_);
+#endif
             for (uint32_t proxy = 0U; proxy < info_.ranksPerServer; ++proxy) {
                 *(__gm__ uint32_t *)(out + BaseAckStageOwnerRowsOffset(layout_, proxy)) = ownerRows;  // 总member数量
             }
@@ -968,6 +1069,11 @@ private:
             }
             CopyPlanToUb(info_.packetDescOffset + packet * PacketElements(), *initUb_, sizeof(SourcePacketDesc));
             const uint32_t memberCount = static_cast<uint32_t>(initUb_->GetValue(2U));  // 发给该server的member数量
+            // Same bound as in ReduceLocalCounts: a packet holds at most k
+            // members, larger values would overrun initUb_ in the copy below.
+            if (memberCount > info_.k) {
+                continue;
+            }
             auto *ack = self + BaseAckLaneOffset(layout_, info_.epWorldSize, info_.epRankId, target);
             cacheReadInvalidate(ack, layout_.baseAckStride);
             const uint32_t expertBegin = target * expertsPerServer_;
@@ -1014,18 +1120,33 @@ private:
 };
 }  // namespace
 
+// Kernel arguments must follow the op prototype order declared in
+// op_host/notify_dispatch_normal_layered.cpp:
+//   inputs  : roce_context, topk_idx
+//   outputs : recvTokensPerExpert, layeredPlan, expertTotalCount
+//   then    : workspace, tiling
+// Swapping the two plan outputs makes plan_ point at the tiny
+// recvTokensPerExpert tensor, so every plan offset (memberDescOffset, ...)
+// lands outside that allocation and the descriptors read back garbage counts.
 extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roceContext, GM_ADDR topkIdx,
-                                                                     GM_ADDR layeredPlan, GM_ADDR recvTokensPerExpert,
+                                                                     GM_ADDR recvTokensPerExpert,
+                                                                     GM_ADDR layeredPlan,
                                                                      GM_ADDR expertTotalCount, GM_ADDR workspace,
                                                                      GM_ADDR tiling)
 {
     REGISTER_TILING_DEFAULT(NotifyDispatchNormalLayeredTilingData);
+    // TPipe must be constructed before GET_TILING_DATA_WITH_STRUCT: the tiling
+    // copy resolves its UB staging buffer through GetTPipePtr(). With the
+    // buffer pool still uninitialised the copy works on a stale UB address,
+    // which is the "scalar access out of internal buffer" (507035) class of
+    // fault and is independent of batch/topk/expert/hidden/network. The working
+    // cam_moe_dispatch_normal_layered entry orders it the same way.
+    TPipe pipe;
     // Must match SetTilingKey(23U) in notify_dispatch_normal_layered_tiling.cc.
     // Declaring the key here is what makes the op compiler emit the _23
     // funcEntry; without it only the default key-0 entry is generated.
     if (TILING_KEY_IS(23)) {
         GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
-        TPipe pipe;
 #ifdef __DAV_C310__
         TBuf hcommUb;
         pipe.InitBuffer(hcommUb, kHcommUbBytes);
@@ -1053,7 +1174,7 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         auto hcommTensor = aggregateCopyTensor;
 #endif
         NotifyDispatchNormalLayered op;
-        op.Init(roceContext, topkIdx, layeredPlan, recvTokensPerExpert, expertTotalCount, workspace, data.layered,
+        op.Init(roceContext, topkIdx, recvTokensPerExpert, layeredPlan, expertTotalCount, workspace, data.layered,
                 doorbell, head, initTensor, reduceSrcTensor, reduceAccTensor, aggregateCopyTensor, hcommTensor,
                 packetPrefixTensor, memberPrefixTensor, expertPrefixTensor);
         op.Process();
