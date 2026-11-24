@@ -1174,7 +1174,7 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         auto hcommTensor = aggregateCopyTensor;
 #endif
         NotifyDispatchNormalLayered op;
-        op.Init(roceContext, topkIdx, recvTokensPerExpert, layeredPlan, expertTotalCount, workspace, data.layered,
+        op.Init(roceContext, topkIdx, layeredPlan, recvTokensPerExpert, expertTotalCount, workspace, data.layered,
                 doorbell, head, initTensor, reduceSrcTensor, reduceAccTensor, aggregateCopyTensor, hcommTensor,
                 packetPrefixTensor, memberPrefixTensor, expertPrefixTensor);
         op.Process();
