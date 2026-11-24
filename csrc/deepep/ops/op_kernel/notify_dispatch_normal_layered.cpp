@@ -41,6 +41,12 @@ static_assert(CACHE_LINE_ISOLATION_BYTES % AscendC::CACHE_LINE_SIZE == 0U,
 // cross-core sync, so one compact marker per stage printed from AIV 0 is
 // enough to name the faulting function: the last marker printed is the stage
 // that faulted, and a marker with no following stage means that stage hung.
+// Inside a stage, TracePoint(id, detail) marks single statements. Its id is
+// "stage * 100 + step", so grep "tp 402" in this file lands on the exact line,
+// and it prints the calling AIV, so a hang in a per-core loop also names the
+// core and the loop index that never came back. Keep the added points few and
+// terse: kernel printf has a small per-core buffer and the last line printed
+// is what identifies the fault on a trap.
 // Compile with -DDEEPEP_LAYERED_DEBUG_LOG=0 to drop every print.
 #ifndef DEEPEP_LAYERED_DEBUG_LOG
 #define DEEPEP_LAYERED_DEBUG_LOG 1
@@ -74,6 +80,26 @@ public:
         (void)stage;
 #endif
         SyncAll<true>();
+    }
+
+    // Fine-grained marker for statements *inside* a stage. Unlike
+    // StageBoundary it does not synchronise cores, so it can be dropped
+    // anywhere, and it prints from every AIV that reaches it: the last line in
+    // the device log then names the exact statement that faulted (507035) or
+    // hung, plus the core and loop index when `detail` carries one.
+    // The id encodes "stage * 100 + step": grep "tp 402" finds the call site.
+    __aicore__ inline void TracePoint(uint32_t point, uint32_t detail)
+    {
+#if DEEPEP_LAYERED_DEBUG_LOG
+        // Drain this core's pipelines so the marker is ordered after the
+        // memory traffic that precedes it and before the one that follows.
+        PipeBarrier<PIPE_ALL>();
+        LAYERED_LOG("[ln] tp %u aiv %u v %u\n", point, static_cast<uint32_t>(GetBlockIdx()), detail);
+        PipeBarrier<PIPE_ALL>();
+#else
+        (void)point;
+        (void)detail;
+#endif
     }
 
     __aicore__ inline void Init(GM_ADDR roceContext, GM_ADDR topkIdx, GM_ADDR layeredPlan, GM_ADDR recvTokensPerExpert,
@@ -275,6 +301,7 @@ private:
         const uint32_t dataSize = dataEnd - dataBegin;
         const uint32_t begin = dataBegin + static_cast<uint32_t>(static_cast<uint64_t>(dataSize) * aiv / aivNum);
         const uint32_t end = dataBegin + static_cast<uint32_t>(static_cast<uint64_t>(dataSize) * (aiv + 1U) / aivNum);
+        TracePoint(201U, begin);
 
         // Clear all ordinary plan metadata except packetSlot, whose sentinel
         // value is INVALID_SLOT rather than zero.
@@ -285,6 +312,7 @@ private:
             const uint32_t zeroBegin = begin > packetSlotEnd ? begin : packetSlotEnd;
             FillPlanRange(zeroBegin, end, 0);
         }
+        TracePoint(202U, end);
 
         // Initialize each AIV's private reduction slices before route building.
         ZeroWorkspaceRange(workspace_ + CountSlice(aiv), countSlicePadded_);
@@ -301,6 +329,7 @@ private:
         const uint32_t packetBegin = static_cast<uint32_t>(packetSlotElements * aiv / aivNum);
         const uint32_t packetEnd = static_cast<uint32_t>(packetSlotElements * (aiv + 1U) / aivNum);
         FillPlanRange(packetSlotBegin + packetBegin, packetSlotBegin + packetEnd, INVALID_SLOT);
+        TracePoint(203U, packetEnd);
     }
 
     __aicore__ inline void ReduceWorkspaceRange(uint32_t dstOffset, uint32_t srcOffset, uint32_t elements,
@@ -402,6 +431,7 @@ private:
         h->reserved[3] = 0U;
         StoreInt32(total_, 0);
         cacheWriteThrough(reinterpret_cast<__gm__ uint8_t *>(h), sizeof(PlanHeader));
+        TracePoint(301U, static_cast<uint32_t>(info_.planElements));
     }
 
     __aicore__ inline void BuildLocalRoutePlanParallel()
@@ -425,7 +455,11 @@ private:
                         descStride, memberScratch, packetSlotScratch);
         }
 #endif
+        TracePoint(401U, begin);
         for (uint32_t token = begin; token < end; ++token) {
+            if ((token & 63U) == 0U) {
+                TracePoint(402U, token);
+            }
             for (uint32_t target = 0U; target < info_.serverNum; ++target) {
                 const uint32_t desc = descScratch + target * descStride;
                 initUb_->SetValue(desc, static_cast<int32_t>(token));
@@ -478,12 +512,14 @@ private:
             CopyUbToPlan(info_.packetSlotOffset + token * info_.serverNum, *initUb_, info_.serverNum * sizeof(int32_t),
                          packetSlotScratch);
         }
+        TracePoint(403U, end);
         cacheWriteThrough(reinterpret_cast<__gm__ uint8_t *>(counts),
                           static_cast<uint64_t>(countSlicePadded_) * sizeof(int32_t));
         cacheWriteThrough(reinterpret_cast<__gm__ uint8_t *>(packets),
                           static_cast<uint64_t>(packetSlicePadded_) * sizeof(int32_t));
         cacheWriteThrough(reinterpret_cast<__gm__ uint8_t *>(memberCounts),
                           static_cast<uint64_t>(memberCountSlicePadded_) * sizeof(int32_t));
+        TracePoint(404U, 0U);
     }
 
     __aicore__ inline void ReduceLocalCounts()
@@ -518,6 +554,7 @@ private:
         // 本 rank 发给各目标 expert 的 member 总数
         ReduceWorkspaceRange(info_.expertCountOffset + expertBegin, expertBegin, expertEnd - expertBegin, 0U,
                              countSlicePadded_);
+        TracePoint(501U, expertEnd);
         const uint32_t begin = info_.bs * aiv / n;
         const uint32_t end = info_.bs * (aiv + 1U) / n;
         if (begin == end) {
@@ -530,6 +567,7 @@ private:
                     static_cast<uint64_t>(n) * (countSlicePadded_ + packetSlicePadded_), memberCountSlicePadded_, aiv);
         BuildPrefix(*expertPrefixUb_, expertElements, 0U, countSlicePadded_, aiv);
         SyncFunc<HardEvent::V_S>();
+        TracePoint(502U, 0U);
 #if DEEPEP_LAYERED_DEBUG_LOG
         if (aiv == 0U) {
             LAYERED_LOG("[ln] reduce pkt=%u exp=%u tok=%u..%u aiv=%u cslice=%u\n", packetElements, expertElements,
@@ -538,6 +576,9 @@ private:
 #endif
 
         for (uint32_t token = begin; token < end; ++token) {
+            if ((token & 63U) == 0U) {
+                TracePoint(503U, token);
+            }
             for (uint32_t target = 0; target < info_.serverNum; ++target) {
                 const uint32_t packet = target * info_.slotsPerServer + token;
                 CopyPlanToUb(info_.packetDescOffset + packet * PacketElements(), *initUb_, sizeof(SourcePacketDesc));
@@ -574,6 +615,7 @@ private:
                 CopyUbToPlan(memberOffset, *initUb_, memberBytes);
             }
         }
+        TracePoint(504U, 0U);
     }
 
     __aicore__ inline void PlanOutboundPayloads()
@@ -613,6 +655,7 @@ private:
                 StorePlanValue(p.outboundTotalBytes + 1U, static_cast<int32_t>(total >> 32U));  // 记录总发送量
             }
         }
+        TracePoint(601U, info_.serverNum);
     }
 
     __aicore__ inline bool Wait(__gm__ uint64_t *f, uint64_t expected)
@@ -717,6 +760,7 @@ private:
             cacheWriteThrough((__gm__ uint8_t *)flag, sizeof(uint64_t));
 
             // 发送给同号卡
+            TracePoint(701U, target);
             const uint32_t proxyRank = target * info_.ranksPerServer + info_.rankInServer;
             auto *in = (__gm__ uint8_t *)comm_.WindowIn(proxyRank);
             // 目的位置
@@ -730,6 +774,7 @@ private:
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, proxyRank, *doorbell_, *head_);
             }
         }
+        TracePoint(702U, 0U);
     }
 
     __aicore__ inline void AggregateServerCounts()
@@ -747,11 +792,13 @@ private:
             const uint32_t source = proxyInServer + sourceServer * info_.ranksPerServer;
             // 等待源rank的flag
             const uint64_t flag = ControlFlagOffset(layout_, info_.epWorldSize, source, sourceServer_);
+            TracePoint(801U, sourceServer);
             Wait((__gm__ uint64_t *)(in + flag), ComposeFlag(info_.epoch, Phase::CONTROL_COUNT_READY));
             cacheReadInvalidate(in + ControlLaneOffset(layout_, info_.epWorldSize, source, sourceServer_),
                                 layout_.controlStride);
         }
         SyncAll<true>();
+        TracePoint(802U, 0U);
 
         // 按照本地rank分核
         for (uint32_t ownerInServer = ownerBegin; ownerInServer < ownerEnd; ++ownerInServer) {
@@ -777,6 +824,7 @@ private:
             auto *ownerWindow = (__gm__ uint8_t *)comm_.WindowIn(owner);  // 本地其他rank的接收缓冲区
             const uint32_t blockBytes = 32U;
             const uint32_t blockCount = static_cast<uint32_t>(layout_.proxyAggregateStride / blockBytes);
+            TracePoint(803U, ownerInServer);
             for (uint32_t block = 0; block < blockCount;) {
                 const uint32_t blockNum = min(kAggregateCopyTileBytes / blockBytes, blockCount - block);
                 const uint32_t byteOffset = block * blockBytes;
@@ -798,6 +846,7 @@ private:
             auto *flag = (__gm__ uint64_t *)(ownerWindow + ProxyAggregateFlagOffset(layout_, proxyInServer));
             CopyWindowFlag(flag, ComposeFlag(info_.epoch, Phase::SERVER_FANOUT_DONE));
         }
+        TracePoint(804U, 0U);
     }
 
     __aicore__ inline void ApplyProxyAggregatesToOwner()
@@ -809,9 +858,11 @@ private:
         // 等待所有 proxy 发来的 aggregate
         for (uint32_t proxy = aiv; proxy < info_.ranksPerServer; proxy += aivNum) {
             auto *flag = (__gm__ uint64_t *)(own + ProxyAggregateFlagOffset(layout_, proxy));
+            TracePoint(901U, proxy);
             Wait(flag, ComposeFlag(info_.epoch, Phase::SERVER_FANOUT_DONE));
         }
         SyncAll<true>();
+        TracePoint(902U, 0U);
 
         if (aiv == 0U) {
             for (uint32_t proxy = 0U; proxy < info_.ranksPerServer; ++proxy) {
@@ -820,6 +871,7 @@ private:
             uint32_t ownerRows = 0U;
             int32_t physicalOffset = 0;
             const uint32_t alignment = info_.expertAlignment == 0U ? 1U : info_.expertAlignment;
+            TracePoint(903U, localExperts_);
             for (uint32_t local = 0U; local < localExperts_; ++local) {
                 int32_t running = 0;
                 for (uint32_t sourceServer = 0U; sourceServer < info_.serverNum; ++sourceServer) {
@@ -853,6 +905,7 @@ private:
             cacheWriteThrough(reinterpret_cast<__gm__ uint8_t *>(recv_),
                               static_cast<uint64_t>(localExperts_) * sizeof(int32_t));
         }
+        TracePoint(904U, 0U);
     }
 
     __aicore__ inline void FanoutBaseAckSlicesToProxies()
@@ -869,12 +922,14 @@ private:
         for (uint32_t proxyInServer = proxyBegin; proxyInServer < proxyEnd; ++proxyInServer) {
             const uint32_t proxy = sourceServer_ * info_.ranksPerServer + proxyInServer;
             auto *proxyWindow = (__gm__ uint8_t *)comm_.WindowIn(proxy);
+            TracePoint(1001U, proxyInServer);
             CopyWindowBytes(out + BaseAckStageOffset(layout_, proxyInServer, 0U),
                             proxyWindow + BaseAckFanoutOwnerOffset(layout_, info_.rankInServer),
                             layout_.baseAckStageProxyStride);
             CopyWindowFlag((__gm__ uint64_t *)(proxyWindow + BaseAckFanoutFlagOffset(layout_, info_.rankInServer)),
                            ComposeFlag(info_.epoch, Phase::SERVER_FANOUT_DONE));
         }
+        TracePoint(1002U, 0U);
     }
 
     __aicore__ inline void WaitAllBaseAckSlices()
@@ -883,9 +938,11 @@ private:
         const uint32_t aiv = GetBlockIdx();
         const uint32_t aivNum = info_.aivNum == 0U ? 1U : info_.aivNum;
         for (uint32_t owner = aiv; owner < info_.ranksPerServer; owner += aivNum) {
+            TracePoint(1101U, owner);
             Wait((__gm__ uint64_t *)(own + BaseAckFanoutFlagOffset(layout_, owner)),
                  ComposeFlag(info_.epoch, Phase::SERVER_FANOUT_DONE));
         }
+        TracePoint(1102U, 0U);
     }
 
     __aicore__ inline void AssembleBaseAcksAtProxies()
@@ -902,6 +959,7 @@ private:
                                         << 32U);  // 本rank的总发送量
         for (uint32_t sourceServer = aiv; sourceServer < info_.serverNum; sourceServer += aivNum) {
             const uint32_t sourceRank = sourceServer * info_.ranksPerServer + info_.rankInServer;
+            TracePoint(1201U, sourceServer);
             // ack[server][rank]
             auto *ack = out + BaseAckLaneOffset(layout_, info_.epWorldSize, sourceRank, sourceServer_);
             uint32_t serverMaxRows = 0U;  // 计算最大行
@@ -965,6 +1023,7 @@ private:
                                     sizeof(int32_t));  // 将每个本地rank专家计算的 BaseAckStage 拷到这里
             }
         }
+        TracePoint(1202U, 0U);
     }
 
     __aicore__ inline void PublishBaseAcksFromProxies()
@@ -978,6 +1037,7 @@ private:
             auto *sin = (__gm__ uint8_t *)comm_.WindowIn(source);
             // [ownerInServer][localExpert]
             auto *dst = sin + BaseAckLaneOffset(layout_, info_.epWorldSize, source, sourceServer_);
+            TracePoint(1301U, sourceServer);
             if (source == info_.epRankId) {
                 CopyWindowBytes(ack, dst, layout_.baseAckStride);
             } else {
@@ -997,6 +1057,7 @@ private:
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, source, *doorbell_, *head_);
             }
         }
+        TracePoint(1302U, 0U);
     }
     __aicore__ inline void ApplyAllReturnedRowBases()
     {
@@ -1010,12 +1071,14 @@ private:
             }
             total_[0] = total;
             cacheWriteThrough(reinterpret_cast<__gm__ uint8_t *>(total_), sizeof(int32_t));
+            TracePoint(1401U, static_cast<uint32_t>(total));
         }
 
         // 等待数据收齐
         uint32_t localMaxRows = 0U;
         for (uint32_t target = aiv; target < info_.serverNum; target += aivNum) {
             auto *f = (__gm__ uint64_t *)(self + BaseAckFlagOffset(layout_, info_.epWorldSize, info_.epRankId, target));
+            TracePoint(1402U, target);
             Wait(f, ComposeFlag(info_.epoch, Phase::CONTROL_BASE_READY));
             auto *ack = self + BaseAckLaneOffset(layout_, info_.epWorldSize, info_.epRankId, target);
             cacheReadInvalidate(ack, layout_.baseAckStride);
@@ -1038,6 +1101,7 @@ private:
         workspace_[MaxRowsScratch(aiv)] = static_cast<int32_t>(localMaxRows);
         cacheWriteThrough((__gm__ uint8_t *)(workspace_ + MaxRowsScratch(aiv)), sizeof(int32_t));
         SyncAll<true>();
+        TracePoint(1403U, localMaxRows);
 
         if (aiv == 0U) {
             uint32_t globalMaxRows = 0U;
@@ -1061,6 +1125,9 @@ private:
                             static_cast<uint64_t>(packetElements) * info_.k * sizeof(MemberDesc));
         // 每个AIV处理一部分packet
         for (uint32_t packet = begin; packet < end; ++packet) {
+            if ((packet & 63U) == 0U) {
+                TracePoint(1404U, packet);
+            }
             const uint32_t target = (packet / info_.slotsPerServer) % info_.serverNum;
             const uint32_t slot = packet % info_.slotsPerServer;
             const uint32_t token = slot;
@@ -1091,6 +1158,7 @@ private:
                 CopyUbToPlan(mb, *initUb_, sizeof(MemberDesc));
             }
         }
+        TracePoint(1405U, end);
     }
     __gm__ int32_t *topk_{nullptr};
     __gm__ int32_t *plan_{nullptr};
