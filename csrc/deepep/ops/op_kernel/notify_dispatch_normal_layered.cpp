@@ -1210,10 +1210,26 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
     // fault and is independent of batch/topk/expert/hidden/network. The working
     // cam_moe_dispatch_normal_layered entry orders it the same way.
     TPipe pipe;
+#if DEEPEP_LAYERED_DEBUG_LOG
+    // Fixed boot marker: proves kernel printf reaches the device log at all,
+    // independently of tiling data and of any stage/point being reached.
+    PipeBarrier<PIPE_ALL>();
+    if (GetBlockIdx() == 0U) {
+        LAYERED_LOG("[ln] boot notify_dispatch_normal_layered\n");
+    }
+    PipeBarrier<PIPE_ALL>();
+#endif
     // Must match SetTilingKey(23U) in notify_dispatch_normal_layered_tiling.cc.
     // Declaring the key here is what makes the op compiler emit the _23
     // funcEntry; without it only the default key-0 entry is generated.
     if (TILING_KEY_IS(23)) {
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] tiling key 23 entered\n");
+        }
+        PipeBarrier<PIPE_ALL>();
+#endif
         GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
 #ifdef __DAV_C310__
         TBuf hcommUb;
@@ -1246,6 +1262,13 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
                 doorbell, head, initTensor, reduceSrcTensor, reduceAccTensor, aggregateCopyTensor, hcommTensor,
                 packetPrefixTensor, memberPrefixTensor, expertPrefixTensor);
         op.Process();
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] done notify_dispatch_normal_layered\n");
+        }
+        PipeBarrier<PIPE_ALL>();
+#endif
     }
 }
 
