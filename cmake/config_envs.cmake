@@ -6,65 +6,50 @@ if (NOT EXISTS ${PYTHON_EXECUTABLE})
 endif ()
 
 # get torch path, torch npu path, pybind11 path via python script
+# 每条信息带唯一前缀输出, 避免 torch/torch_npu 自身的 warning 干扰解析
 execute_process(
         COMMAND ${PYTHON_EXECUTABLE} "-c"
-        "import torch; import torch_npu; import os; import pybind11;
-torch_dir = os.path.realpath(os.path.dirname(torch.__file__));
-torch_npu_dir = os.path.realpath(os.path.dirname(torch_npu.__file__));
-pybind11_dir = os.path.realpath(os.path.dirname(pybind11.__file__));
-abi_enabled=torch.compiled_with_cxx11_abi();
-print(torch_dir, torch_npu_dir, pybind11_dir, abi_enabled, end='');
-quit(0)
-        "
+        "import torch, torch_npu, pybind11, os
+print('TORCH_DIR=' + os.path.realpath(os.path.dirname(torch.__file__)))
+print('TORCH_NPU_DIR=' + os.path.realpath(os.path.dirname(torch_npu.__file__)))
+print('PYBIND11_DIR=' + os.path.realpath(os.path.dirname(pybind11.__file__)))
+print('TORCH_API_ENABLED=' + str(torch.compiled_with_cxx11_abi()))"
         RESULT_VARIABLE EXEC_RESULT
-        OUTPUT_VARIABLE OUTPUT_ENV_DEFINES)
+        OUTPUT_VARIABLE OUTPUT_ENV_DEFINES
+)
 
 # if failed to run the python script
-if (NOT ${EXEC_RESULT} EQUAL 0)
+if (NOT "${EXEC_RESULT}" STREQUAL "0")
     message(FATAL_ERROR "failed to get run python script to get ENVS like TORCH_DIR etc")
 else ()
     message(STATUS "run python script successfully, output string is [${OUTPUT_ENV_DEFINES}]")
 endif ()
 
-# extract TORCH_DIR and set it
-execute_process(
-        COMMAND sh -c "echo \"${OUTPUT_ENV_DEFINES}\" | awk '{print $1}'"
-        OUTPUT_VARIABLE TORCH_DIR
-        RESULT_VARIABLE EXEC_RESULT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+# 按前缀精确提取, 允许输出中夹杂其它无关行
+string(REGEX MATCH "TORCH_DIR=([^\n\r]*)" _TORCH_MATCH "${OUTPUT_ENV_DEFINES}")
+set(TORCH_DIR "${CMAKE_MATCH_1}")
 
-# extract TORCH_NPU_DIR and set it
-execute_process(
-        COMMAND sh -c "echo \"${OUTPUT_ENV_DEFINES}\" | awk '{print $2}'"
-        OUTPUT_VARIABLE TORCH_NPU_DIR
-        RESULT_VARIABLE EXEC_RESULT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+string(REGEX MATCH "TORCH_NPU_DIR=([^\n\r]*)" _TORCH_NPU_MATCH "${OUTPUT_ENV_DEFINES}")
+set(TORCH_NPU_DIR "${CMAKE_MATCH_1}")
 
-# extract PYBIND11_DIR and set it
-execute_process(
-        COMMAND sh -c "echo \"${OUTPUT_ENV_DEFINES}\" | awk '{print $3}'"
-        OUTPUT_VARIABLE PYBIND11_DIR
-        RESULT_VARIABLE EXEC_RESULT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+string(REGEX MATCH "PYBIND11_DIR=([^\n\r]*)" _PYBIND11_MATCH "${OUTPUT_ENV_DEFINES}")
+set(PYBIND11_DIR "${CMAKE_MATCH_1}")
 
-# extract PYTROCH_ABI and set it
-execute_process(
-        COMMAND sh -c "echo \"${OUTPUT_ENV_DEFINES}\" | awk '{print $4}'"
-        OUTPUT_VARIABLE TORCH_API_ENABLED
-        RESULT_VARIABLE EXEC_RESULT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+string(REGEX MATCH "TORCH_API_ENABLED=([^\n\r]*)" _TORCH_ABI_MATCH "${OUTPUT_ENV_DEFINES}")
+set(TORCH_API_ENABLED "${CMAKE_MATCH_1}")
+
+if (NOT TORCH_DIR OR NOT TORCH_NPU_DIR OR NOT PYBIND11_DIR OR NOT TORCH_API_ENABLED)
+    message(FATAL_ERROR "failed to parse ENVS from python script, output is [${OUTPUT_ENV_DEFINES}]")
+endif ()
 
 message(STATUS "SOC_VERSION=${SOC_VERSION}")
 message(STATUS "TORCH_DIR=${TORCH_DIR}")
 message(STATUS "TORCH_NPU_DIR=${TORCH_NPU_DIR}")
 message(STATUS "PYBIND11_DIR=${PYBIND11_DIR}")
+message(STATUS "TORCH_API_ENABLED=${TORCH_API_ENABLED}")
 
 # set _GLIBCXX_USE_CXX11_ABI
-if (${TORCH_API_ENABLED} STREQUAL "True")
+if ("${TORCH_API_ENABLED}" STREQUAL "True")
     add_compile_options(-D_GLIBCXX_USE_CXX11_ABI=1)
     message(STATUS "_GLIBCXX_USE_CXX11_ABI=1")
 else ()
