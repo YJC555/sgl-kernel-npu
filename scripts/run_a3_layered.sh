@@ -18,8 +18,14 @@ WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$WORKDIR" || exit 1
 
 export RANK0_IP="${RANK0_IP:-61.47.19.68}"
+
+# CANN(plog/device)日志统一落到仓库目录下, 便于直接 grep 打点
+mkdir -p logs/cann
+export ASCEND_PROCESS_LOG_PATH="${ASCEND_PROCESS_LOG_PATH:-$WORKDIR/logs/cann}"
+
+# kernel printf 需要 INFO 级别才输出; 终端侧下面已做过滤, 不会刷屏
+export ASCEND_GLOBAL_LOG_LEVEL="${ASCEND_GLOBAL_LOG_LEVEL:-1}"
 export ASCEND_SLOG_PRINT_TO_STDOUT=1
-unset ASCEND_GLOBAL_LOG_LEVEL
 
 NUM_TOKENS="${NUM_TOKENS:-1024}"
 export HCCL_BUFFSIZE="${HCCL_BUFFSIZE:-1024}"
@@ -45,6 +51,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="logs/a3-${STAMP}-rank${RANK:-auto}.log"
 
 echo "[run] RANK=${RANK:-auto} RANK0_IP=${RANK0_IP} num_tokens=${NUM_TOKENS} 日志: ${LOG}"
+echo "[run] CANN 日志目录: $ASCEND_PROCESS_LOG_PATH"
 
 bash tests/python/deepep/run_test_internode_a3.sh "${extra_args[@]}" "$@" 2>&1 \
   | tee "$LOG" \
@@ -52,4 +59,13 @@ bash tests/python/deepep/run_test_internode_a3.sh "${extra_args[@]}" "$@" 2>&1 \
 
 rc=${PIPESTATUS[0]}
 echo "[run] 退出码 ${rc}, 完整日志: ${LOG}"
+
+# 把 CANN 侧的打点与 trap 信息汇总到仓库目录下, 方便直接查看
+hit="$(grep -rl '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" 2>/dev/null | head -3)"
+if [ -n "$hit" ]; then
+  grep -rh '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" 2>/dev/null | tail -40 > logs/last-trace.log
+  echo "[run] 打点汇总: logs/last-trace.log (共 $(grep -rh '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" 2>/dev/null | wc -l) 行)"
+else
+  echo "[run] CANN 日志中没有 [ln] 打点; 检查: grep -r 'MTE_ERR\|FIX_ERR\|trap' $ASCEND_PROCESS_LOG_PATH | tail"
+fi
 exit "$rc"
