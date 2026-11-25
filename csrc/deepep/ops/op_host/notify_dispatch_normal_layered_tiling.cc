@@ -232,7 +232,12 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
                         w.returnPartialBytes != returnPartialWindowBytes || w.stateLaneStride != stateLaneStride ||
                         w.requiredBytes < w.stateOffset || w.requiredBytes - w.stateOffset < stateWindowBytes ||
                         !CamMoeLayeredHost::ValidWindowCapacity(w, Mc2TilingUtils::GetMaxWindowSize()),
-                    OP_LOGE(n, "normal layered window layout or HCCL buffer capacity is invalid"), return GRAPH_FAILED);
+                    OP_LOGE(n,
+                            "normal layered window layout or HCCL buffer capacity is invalid "
+                            "(requiredBytes=%lu configuredBytes=%lu slots=%lu recordStride=%u partialStride=%u)",
+                            w.requiredBytes, Mc2TilingUtils::GetMaxWindowSize(),
+                            static_cast<unsigned long>(slots), l.recordStride, l.partialStride),
+                    return GRAPH_FAILED);
     l.activeWindowBytes = w.requiredBytes;
     l.windowRequiredBytes = w.requiredBytes;
     const uint64_t maxProxyRank = (serversU - 1U) * ranksU + (ranksU - 1U);
