@@ -1,6 +1,7 @@
 # A3 双节点: 节点内 16 卡走 HCCS, 跨节点先聚合再经 RoCE 发往对端
 # 用法: 先在节点 0 执行 bash run_test_internode_a3.sh, 再在节点 1 执行同一条命令
-RANK0_IP=""
+# 也支持由外部注入: RANK0_IP=<主节点IP> bash run_test_internode_a3.sh
+RANK0_IP="${RANK0_IP:-}"
 IP=$(hostname -I | awk '{print $1}')
 
 if [ -z "${RANK0_IP}" ]; then
@@ -25,8 +26,17 @@ if [ "${LAYERED}" = "1" ]; then
   export DEEPEP_LAYERED_PROTOCAL=roce
 fi
 
+# 清理 shell 里可能残留的"蚂蚁搬家"长序列配置(之前跑过其他回归时 export 过)：
+# Buffer 构造要求 num_tokens <= ROUND * PER_ROUND_TOKENS，本测试 num_tokens=4096，
+# 残留 ROUND=1 / PER_ROUND_TOKENS=32 会直接触发断言。
+unset DEEPEP_NORMAL_LONG_SEQ_ROUND DEEPEP_NORMAL_LONG_SEQ_PER_ROUND_TOKENS
+
 export MASTER_ADDR=${RANK0_IP}
-if [ "${IP}" = "${RANK0_IP}" ]; then
+if [ -n "${RANK:-}" ]; then
+  # 外部脚本可直接注入 RANK，避免 hostname -I 与 RANK0_IP 不一致时判错
+  export RANK
+  echo "env rank ${RANK} (from env)"
+elif [ "${IP}" = "${RANK0_IP}" ]; then
   echo "env rank 0"
   export RANK=0
 else
