@@ -231,6 +231,7 @@ while true; do
             break
         fi
     fi
+    log "等待 ${POLL_INTERVAL}s 后进行下一次检测"
     sleep "$POLL_INTERVAL"
 done
 
