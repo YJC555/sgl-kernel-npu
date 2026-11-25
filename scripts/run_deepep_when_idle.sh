@@ -137,14 +137,19 @@ command -v npu-smi >/dev/null 2>&1 || { log "本机没有 npu-smi，退出"; exi
 log "主节点 $MASTER_IP (本机)，从节点 $SLAVE_IP (ssh $SSH_USER@$SLAVE_IP:$SSH_PORT)"
 log "工程目录: 主=$WORKDIR 从=$WORKDIR_SLAVE"
 log "启动命令: $RUN_CMD"
-log "占用判定: $BUSY_RULE"$([[ "$BUSY_RULE" == "hbm" ]] && echo " (显存阈值 ${BUSY_HBM_MB}MB，低于它视为残留缓存)" || echo " (按进程 pid/name)")", "进程存活校验: $([[ "$CHECK_PROC_ALIVE" == "1" ]] && echo 开启 || echo 关闭)"
+if [[ "$BUSY_RULE" == "hbm" ]]; then
+    log "占用判定: hbm (显存阈值 ${BUSY_HBM_MB}MB，低于它视为残留缓存)"
+else
+    log "占用判定: proc (按进程 pid/name)"
+fi
+log "进程存活校验: $([[ "$CHECK_PROC_ALIVE" == "1" ]] && echo 开启 || echo 关闭)"
 log "轮询 ${POLL_INTERVAL}s，连续空闲 ${IDLE_TIMES} 次后启动$([[ $DRY_RUN == 1 ]] && echo ' (演练模式)')"
 [[ "$LOCAL_ONLY" == "1" ]] && log "本机模式: 只检测本机 NPU，不 ssh 对端"
 
 # ssh 模式先探一次，不通就直接给出修复提示，避免无意义轮询
 if [[ "$LOCAL_ONLY" == "0" ]]; then
     if ! probe_out="$(remote_sh 'npu-smi info' 2>&1)"; then
-        log "ssh 到从节点失败: ${probe_out##*$'\n'}"
+        log "ssh 到从节点失败: $(printf '%s\n' "$probe_out" | tail -n 1)"
         log "请在主节点上配置免密后重试:"
         log "  ssh-copy-id -p $SSH_PORT $SSH_USER@$SLAVE_IP"
         log "  ssh -p $SSH_PORT -o BatchMode=yes $SSH_USER@$SLAVE_IP 'npu-smi info'"
@@ -163,8 +168,14 @@ while true; do
         remote_out="$(remote_sh 'npu-smi info' 2>&1)"
         remote_rc=$?
         # 只要拿不到表格(空输出，或非 0 返回且没有 "|" 开头的行)就算这次失败，并记录原因
-        if [[ -z "$remote_out" ]] || { (( remote_rc != 0 )) && ! printf '%s\n' "$remote_out" | grep -q '^|'; }; then
-            remote_err="${remote_out##*$'\n'}"
+        remote_ok=1
+        if [[ -z "$remote_out" ]]; then
+            remote_ok=0
+        elif [[ "$remote_rc" != "0" ]] && ! printf '%s\n' "$remote_out" | grep -q '^|'; then
+            remote_ok=0
+        fi
+        if [[ "$remote_ok" == "0" ]]; then
+            remote_err="$(printf '%s\n' "$remote_out" | tail -n 1)"
             [[ -z "$remote_err" ]] && remote_err="rc=$remote_rc, 无输出"
             remote_out=""
         fi
