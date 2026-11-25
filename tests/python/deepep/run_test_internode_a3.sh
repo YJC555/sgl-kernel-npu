@@ -31,10 +31,12 @@ while [ $# -gt 0 ]; do
 done
 
 export WORLD_SIZE=2                # 节点数(不是总进程数), 总 rank = 2 * 16
-# 分层窗口大小(MB), 必须满足 ValidWindowCapacity: requiredBytes <= HCCL_BUFFSIZE。
-# 太小会报 "window layout or HCCL buffer capacity is invalid", 太大会在 HCCL
-# 初始化阶段申请失败。4096 tokens / 256 experts / h=7168 的窗口需求约 1~2GB。
-export HCCL_BUFFSIZE=${HCCL_BUFFSIZE:-${HCCL_BUFFER_MB:-4096}}
+# 分层模式窗口需求(见 ops2/op_kernel/moe_distribute_dispatch_v2_layered.h)：
+#   winSizeMin = moeExpertNum * bs * (h*2 + k*4*3) + 800MB(RDMA) + IPC
+# 4096 tokens / 256 experts / h=7168 / k=8 时窗口需求约 1~2GB，默认取 2048MB；
+# 不够时按报错提示用 --hccl-buffer 或 HCCL_BUFFSIZE 调大。
+# "The HCCL_BUFFSIZE is xxxMB, the min value should be xxxxMB" 断言。
+export HCCL_BUFFSIZE=${HCCL_BUFFSIZE:-${HCCL_BUFFER_MB:-2048}}
 export DEEPEP_HCCL_BUFFSIZE=${DEEPEP_HCCL_BUFFSIZE:-${HCCL_BUFFSIZE}}
 echo "[config] HCCL_BUFFSIZE=${HCCL_BUFFSIZE}MB"
 export HCCL_INTRA_PCIE_ENABLE=0     # A3 关闭 A2 的分层 PCIe 通信
