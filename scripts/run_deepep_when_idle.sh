@@ -12,6 +12,7 @@
 #   BUSY_RULE=hbm ./scripts/run_deepep_when_idle.sh  # 改用显存占用判断(默认为进程 pid/name)
 #   BUSY_HBM_MB=2048 ./scripts/run_deepep_when_idle.sh # hbm 规则的显存阈值(MB)
 #   IGNORE_PROC='^python$' ./scripts/run_deepep_when_idle.sh # 忽略名字匹配的进程
+#   CHECK_PROC_ALIVE=1 ./scripts/run_deepep_when_idle.sh     # 额外用 /proc 校验 pid 存活
 #
 # 说明: 启动时会注入 RANK0_IP/RANK/MASTER_ADDR，无需再手工改 a3 脚本里的 RANK0_IP。
 set -uo pipefail
@@ -32,6 +33,7 @@ START_DELAY="${START_DELAY:-10}"              # 从节点先起，等几秒再�
 BUSY_RULE="${BUSY_RULE:-proc}"                # proc: 按进程 pid/name 判断(默认); hbm: 按显存占用判断
 BUSY_HBM_MB="${BUSY_HBM_MB:-1024}"            # hbm 规则阈值(MB)，低于它视为残留缓存不算占用
 IGNORE_PROC="${IGNORE_PROC:-}"                # 忽略的进程名正则，例如 '^python$'
+CHECK_PROC_ALIVE="${CHECK_PROC_ALIVE:-0}"     # 1: 再用 /proc 校验 pid 存活(容器内 pid 命名空间不同会误判)
 # ======================================================
 
 DRY_RUN=0
@@ -40,7 +42,7 @@ while getopts ":nlh" opt; do
     case "$opt" in
         n) DRY_RUN=1 ;;
         l) LOCAL_ONLY=1 ;;
-        h) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        h) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "未知参数 -$OPTARG, 用 -h 查看用法" >&2; exit 1 ;;
     esac
 done
@@ -69,28 +71,32 @@ proc_pairs_from_stdin() {
         }'
 }
 
-# 本机进程行中，只要有一个 pid 还活着且不是僵尸，就认为卡被占用。
+# 本机进程行中，只要有一行没被 IGNORE_PROC 过滤掉，就认为卡被占用。
+# CHECK_PROC_ALIVE=1 时才额外要求 pid 在本机 /proc 里存活(非容器场景用，避免残留记录误判)。
 proc_busy_local_from_stdin() {
     local pid name state
     while read -r pid name; do
         [[ -n "$IGNORE_PROC" && "$name" =~ $IGNORE_PROC ]] && continue
-        [[ -d "/proc/$pid" ]] || continue                 # 已退出进程的残留记录
-        state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null)"
-        [[ "$state" == "Z" ]] && continue                 # 僵尸进程
+        if [[ "$CHECK_PROC_ALIVE" == "1" ]]; then
+            [[ -d "/proc/$pid" ]] || continue                 # 已退出进程的残留记录
+            state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null)"
+            [[ "$state" == "Z" ]] && continue                 # 僵尸进程
+        fi
         return 0
     done < <(proc_pairs_from_stdin)
     return 1
 }
 
-# ssh 模式: pid 在对端，需要在从节点上做同样的存活判断。
+# ssh 模式: pid 在对端，CHECK_PROC_ALIVE=1 时在从节点上做同样的存活判断。
 proc_busy_remote_from_stdin() {
     local pid name
     while read -r pid name; do
         [[ -n "$IGNORE_PROC" && "$name" =~ $IGNORE_PROC ]] && continue
-        if remote_sh "test -d /proc/$pid && ! awk '{print \$3}' /proc/$pid/stat 2>/dev/null | grep -qx Z" \
-            >/dev/null 2>&1; then
-            return 0
+        if [[ "$CHECK_PROC_ALIVE" == "1" ]]; then
+            remote_sh "test -d /proc/$pid && ! awk '{print \$3}' /proc/$pid/stat 2>/dev/null | grep -qx Z" \
+                >/dev/null 2>&1 || continue
         fi
+        return 0
     done < <(proc_pairs_from_stdin)
     return 1
 }
@@ -131,7 +137,7 @@ command -v npu-smi >/dev/null 2>&1 || { log "本机没有 npu-smi，退出"; exi
 log "主节点 $MASTER_IP (本机)，从节点 $SLAVE_IP (ssh $SSH_USER@$SLAVE_IP:$SSH_PORT)"
 log "工程目录: 主=$WORKDIR 从=$WORKDIR_SLAVE"
 log "启动命令: $RUN_CMD"
-log "占用判定: $BUSY_RULE"$([[ "$BUSY_RULE" == "hbm" ]] && echo " (显存阈值 ${BUSY_HBM_MB}MB，低于它视为残留缓存)" || echo " (按进程 pid/name，忽略已退出/僵尸进程)")
+log "占用判定: $BUSY_RULE"$([[ "$BUSY_RULE" == "hbm" ]] && echo " (显存阈值 ${BUSY_HBM_MB}MB，低于它视为残留缓存)" || echo " (按进程 pid/name)")", "进程存活校验: $([[ "$CHECK_PROC_ALIVE" == "1" ]] && echo 开启 || echo 关闭)"
 log "轮询 ${POLL_INTERVAL}s，连续空闲 ${IDLE_TIMES} 次后启动$([[ $DRY_RUN == 1 ]] && echo ' (演练模式)')"
 [[ "$LOCAL_ONLY" == "1" ]] && log "本机模式: 只检测本机 NPU，不 ssh 对端"
 
@@ -194,7 +200,7 @@ while true; do
         fi
     else
         idle_streak=$((idle_streak + 1))
-        if [[ "$BUSY_RULE" == "proc" ]]; then
+        if [[ "$BUSY_RULE" == "proc" && "$CHECK_PROC_ALIVE" == "1" ]]; then
             printf '%s\n' "$local_out" | proc_pairs_from_stdin | awk '{printf "    忽略残留记录: pid=%s name=%s\n", $1, $2}'
         fi
         if [[ "$LOCAL_ONLY" == "1" ]]; then
