@@ -158,8 +158,16 @@ idle_streak=0
 while true; do
     local_out="$(npu-smi info 2>/dev/null || true)"
     remote_out=""
+    remote_err=""
     if [[ "$LOCAL_ONLY" == "0" ]]; then
-        remote_out="$(remote_sh 'npu-smi info' 2>/dev/null || true)"
+        remote_out="$(remote_sh 'npu-smi info' 2>&1)"
+        remote_rc=$?
+        # 只要拿不到表格(空输出，或非 0 返回且没有 "|" 开头的行)就算这次失败，并记录原因
+        if [[ -z "$remote_out" ]] || { (( remote_rc != 0 )) && ! printf '%s\n' "$remote_out" | grep -q '^|'; }; then
+            remote_err="${remote_out##*$'\n'}"
+            [[ -z "$remote_err" ]] && remote_err="rc=$remote_rc, 无输出"
+            remote_out=""
+        fi
     fi
 
     if [[ -z "$local_out" ]]; then
@@ -169,7 +177,7 @@ while true; do
         continue
     fi
     if [[ "$LOCAL_ONLY" == "0" && -z "$remote_out" ]]; then
-        log "ssh 到 $SLAVE_IP 失败或无输出，继续等待(不盲跑)"
+        log "ssh 到 $SLAVE_IP 失败或无输出，继续等待(不盲跑)${remote_err:+: $remote_err}"
         idle_streak=0
         sleep "$POLL_INTERVAL"
         continue
