@@ -54,7 +54,11 @@ fi
 # 清理 shell 里可能残留的"蚂蚁搬家"长序列配置(之前跑过其他回归时 export 过)：
 # Buffer 构造要求 num_tokens <= ROUND * PER_ROUND_TOKENS，本测试 num_tokens=4096，
 # 残留 ROUND=1 / PER_ROUND_TOKENS=32 会直接触发断言。
-unset DEEPEP_NORMAL_LONG_SEQ_ROUND DEEPEP_NORMAL_LONG_SEQ_PER_ROUND_TOKENS
+if [ "${KEEP_LONG_SEQ_ENV:-0}" = "1" ]; then
+  echo "[config] 保留外部长序列配置: ROUND=${DEEPEP_NORMAL_LONG_SEQ_ROUND:-unset} PER_ROUND_TOKENS=${DEEPEP_NORMAL_LONG_SEQ_PER_ROUND_TOKENS:-unset}"
+else
+  unset DEEPEP_NORMAL_LONG_SEQ_ROUND DEEPEP_NORMAL_LONG_SEQ_PER_ROUND_TOKENS
+fi
 
 export MASTER_ADDR=${RANK0_IP}
 if [ -n "${RANK:-}" ]; then
