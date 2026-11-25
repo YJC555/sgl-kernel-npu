@@ -13,7 +13,12 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$script_dir" || exit
 
 export WORLD_SIZE=2                # 节点数(不是总进程数), 总 rank = 2 * 16
-export HCCL_BUFFSIZE=3000
+# 分层模式窗口需求(见 ops2/op_kernel/moe_distribute_dispatch_v2_layered.h)：
+#   winSizeMin = moeExpertNum * bs * (h*2 + k*4*3) + 800MB(RDMA) + IPC
+# 4096 tokens / 256 experts / h=7168 / k=8 时约 15GB，原来的 3000MB 会触发
+# "The HCCL_BUFFSIZE is 3000MB, the min value should be xxxxMB" 断言。
+export HCCL_BUFFSIZE=${HCCL_BUFFSIZE:-16384}
+export DEEPEP_HCCL_BUFFSIZE=${DEEPEP_HCCL_BUFFSIZE:-${HCCL_BUFFSIZE}}
 export HCCL_INTRA_PCIE_ENABLE=0     # A3 关闭 A2 的分层 PCIe 通信
 export HCCL_INTRA_ROCE_ENABLE=1     # A3 跨节点走 RoCE
 export DEEPEp_BAREMETAL=1           # 裸机模式: 跳过 K8s 主节点发现
