@@ -53,11 +53,20 @@ LOG="logs/a3-${STAMP}-rank${RANK:-auto}.log"
 echo "[run] RANK=${RANK:-auto} RANK0_IP=${RANK0_IP} num_tokens=${NUM_TOKENS} 日志: ${LOG}"
 echo "[run] CANN 日志目录: $ASCEND_PROCESS_LOG_PATH"
 
-bash tests/python/deepep/run_test_internode_a3.sh "${extra_args[@]}" "$@" 2>&1 \
-  | tee "$LOG" \
-  | grep --line-buffered -E '\[ln\]|\[config\]|routing|ERROR|Error|failed|Failed|invalid|trap|exception|aclnn'
+bash tests/python/deepep/run_test_internode_a3.sh "${extra_args[@]}" "$@" > "$LOG" 2>&1 &
+test_pid=$!
+echo "[run] 已启动 pid=$test_pid (完整输出进日志, 终端只显示关键行)"
 
-rc=${PIPESTATUS[0]}
+# 只把打点/配置/错误行实时回显到终端, INFO 不进终端
+tail -n +1 -f "$LOG" 2>/dev/null \
+  | grep --line-buffered -E '\[ln\]|\[config\]|routing|ERROR|Error|failed|Failed|invalid|trap|exception|aclnn' &
+filter_pid=$!
+
+wait "$test_pid"
+rc=$?
+kill "$filter_pid" 2>/dev/null
+wait "$filter_pid" 2>/dev/null
+
 echo "[run] 退出码 ${rc}, 完整日志: ${LOG}"
 
 # 把 CANN 侧的打点与 trap 信息汇总到仓库目录下, 方便直接查看

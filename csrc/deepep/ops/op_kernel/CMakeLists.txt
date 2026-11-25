@@ -63,7 +63,8 @@ npu_op_package_add(${package_name}
 )
 
 npu_op_kernel_options("" ALL OPTIONS
-    -DASCENDC_DUMP=0
+    # kernel 侧 printf/DumpTensor 由该宏控制, 置 0 会导致打点被编译期裁掉
+    -DASCENDC_DUMP=1
     --cce-auto-sync=off
     ${_DISPATCH_FFN_INC_OPTS}
     ${_A5_FUSED_DEEP_MOE_INC_OPTS})
