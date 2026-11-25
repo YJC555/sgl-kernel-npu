@@ -9,6 +9,8 @@
 #   MASTER_IP=x SLAVE_IP=y SSH_USER=user ./scripts/run_deepep_when_idle.sh
 #   RUN_CMD='bash tests/python/deepep/run_test_internode_a3.sh'   # 默认值即此
 #   RANK=0|1 ./scripts/run_deepep_when_idle.sh -l  # 本机模式建议显式指定 RANK
+#   BUSY_RULE=proc ./scripts/run_deepep_when_idle.sh  # 改回"有进程即忙碌"的旧判定
+#   BUSY_HBM_MB=2048 ./scripts/run_deepep_when_idle.sh # 调整显存占用阈值(MB)
 #
 # 说明: 启动时会注入 RANK0_IP/RANK/MASTER_ADDR，无需再手工改 a3 脚本里的 RANK0_IP。
 set -uo pipefail
@@ -25,6 +27,8 @@ LOG_DIR="${LOG_DIR:-$WORKDIR/logs}"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"          # 轮询间隔(秒)
 IDLE_TIMES="${IDLE_TIMES:-2}"                 # 连续空闲多少次才启动，避免刚结束的任务还没释放
 START_DELAY="${START_DELAY:-10}"              # 从节点先起，等几秒再起主节点
+BUSY_RULE="${BUSY_RULE:-hbm}"                 # hbm: 按显存占用判断(默认); proc: 有进程行就算忙
+BUSY_HBM_MB="${BUSY_HBM_MB:-1024}"            # hbm 规则阈值(MB)，低于它视为残留缓存不算占用
 # ======================================================
 
 DRY_RUN=0
@@ -33,7 +37,7 @@ while getopts ":nlh" opt; do
     case "$opt" in
         n) DRY_RUN=1 ;;
         l) LOCAL_ONLY=1 ;;
-        h) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        h) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "未知参数 -$OPTARG, 用 -h 查看用法" >&2; exit 1 ;;
     esac
 done
@@ -50,11 +54,43 @@ proc_lines_from_stdin() {
     awk '/^\|[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]*\|/'
 }
 
+# 从 npu-smi info 的芯片行里解析 "used / total"，任一行 used >= 阈值即认为被占用。
+# 这样不会因为卡上有几百 MB 的基础缓存（或已退出进程的残留记录）而误判忙碌。
+hbm_busy_from_stdin() {
+    awk -v th="$BUSY_HBM_MB" '
+        /^\|/ {
+            s = $0
+            while (match(s, /[0-9]+[[:space:]]*\/[[:space:]]*[0-9]+/)) {
+                pair = substr(s, RSTART, RLENGTH)
+                split(pair, p, "/")
+                used = p[1] + 0
+                total = p[2] + 0
+                if (total > 0 && used >= th) { found = 1 }
+                s = substr(s, RSTART + RLENGTH)
+            }
+        }
+        END { exit found ? 0 : 1 }
+    '
+}
+
+usage_lines_from_stdin() {
+    awk '/^\|/ && /\//'
+}
+
+show_busy_lines() {
+    if [[ "$BUSY_RULE" == "hbm" ]]; then
+        usage_lines_from_stdin
+    else
+        proc_lines_from_stdin
+    fi
+}
+
 command -v npu-smi >/dev/null 2>&1 || { log "本机没有 npu-smi，退出"; exit 1; }
 
 log "主节点 $MASTER_IP (本机)，从节点 $SLAVE_IP (ssh $SSH_USER@$SLAVE_IP:$SSH_PORT)"
 log "工程目录: 主=$WORKDIR 从=$WORKDIR_SLAVE"
 log "启动命令: $RUN_CMD"
+log "占用判定: $BUSY_RULE"$([[ "$BUSY_RULE" == "hbm" ]] && echo " (显存阈值 ${BUSY_HBM_MB}MB，低于它视为残留缓存)")
 log "轮询 ${POLL_INTERVAL}s，连续空闲 ${IDLE_TIMES} 次后启动$([[ $DRY_RUN == 1 ]] && echo ' (演练模式)')"
 [[ "$LOCAL_ONLY" == "1" ]] && log "本机模式: 只检测本机 NPU，不 ssh 对端"
 
@@ -82,9 +118,12 @@ while true; do
 
     local_busy=0
     remote_busy=0
-    printf '%s\n' "$local_out" | busy_from_stdin && local_busy=1
-    if [[ "$LOCAL_ONLY" == "0" ]]; then
-        printf '%s\n' "$remote_out" | busy_from_stdin && remote_busy=1
+    if [[ "$BUSY_RULE" == "hbm" ]]; then
+        if printf '%s\n' "$local_out" | hbm_busy_from_stdin; then local_busy=1; fi
+        if [[ "$LOCAL_ONLY" == "0" ]] && printf '%s\n' "$remote_out" | hbm_busy_from_stdin; then remote_busy=1; fi
+    else
+        if printf '%s\n' "$local_out" | busy_from_stdin; then local_busy=1; fi
+        if [[ "$LOCAL_ONLY" == "0" ]] && printf '%s\n' "$remote_out" | busy_from_stdin; then remote_busy=1; fi
     fi
 
     if [[ "$local_busy" == "1" || "$remote_busy" == "1" ]]; then
@@ -94,8 +133,12 @@ while true; do
         else
             log "忙碌: 主节点=$( [[ $local_busy == 1 ]] && echo 占用 || echo 空闲 ) 从节点=$( [[ $remote_busy == 1 ]] && echo 占用 || echo 空闲 )"
         fi
-        [[ "$local_busy" == "1" ]] && printf '%s\n' "$local_out" | proc_lines_from_stdin | sed 's/^/    主: /'
-        [[ "$remote_busy" == "1" ]] && printf '%s\n' "$remote_out" | proc_lines_from_stdin | sed 's/^/    从: /'
+        if [[ "$local_busy" == "1" ]]; then
+            printf '%s\n' "$local_out" | show_busy_lines | sed 's/^/    主: /'
+        fi
+        if [[ "$remote_busy" == "1" ]]; then
+            printf '%s\n' "$remote_out" | show_busy_lines | sed 's/^/    从: /'
+        fi
     else
         idle_streak=$((idle_streak + 1))
         if [[ "$LOCAL_ONLY" == "1" ]]; then
