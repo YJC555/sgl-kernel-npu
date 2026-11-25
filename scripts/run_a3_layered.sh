@@ -23,9 +23,11 @@ export RANK0_IP="${RANK0_IP:-61.47.19.68}"
 mkdir -p logs/cann
 export ASCEND_PROCESS_LOG_PATH="${ASCEND_PROCESS_LOG_PATH:-$WORKDIR/logs/cann}"
 
-# kernel printf 需要 INFO 级别才输出; 终端侧下面已做过滤, 不会刷屏
+# kernel printf 由 INFO 级别的 device log 承载, 级别必须 <= 1
 export ASCEND_GLOBAL_LOG_LEVEL="${ASCEND_GLOBAL_LOG_LEVEL:-1}"
-export ASCEND_SLOG_PRINT_TO_STDOUT=1
+# 默认不把 CANN host/GE 日志打到 stdout(否则 INFO/GE 刷屏), 全部落 logs/cann;
+# 需要实时看全量日志时用 VERBOSE=1 覆盖
+export ASCEND_SLOG_PRINT_TO_STDOUT="${ASCEND_SLOG_PRINT_TO_STDOUT:-0}"
 
 NUM_TOKENS="${NUM_TOKENS:-1024}"
 export HCCL_BUFFSIZE="${HCCL_BUFFSIZE:-1024}"
@@ -50,6 +52,7 @@ mkdir -p logs
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="logs/a3-${STAMP}-rank${RANK:-auto}.log"
 
+echo "[run] script-rev=2 (终端只回显关键行, CANN 日志落 logs/cann)"
 echo "[run] RANK=${RANK:-auto} RANK0_IP=${RANK0_IP} num_tokens=${NUM_TOKENS} 日志: ${LOG}"
 echo "[run] CANN 日志目录: $ASCEND_PROCESS_LOG_PATH"
 
@@ -69,12 +72,13 @@ wait "$filter_pid" 2>/dev/null
 
 echo "[run] 退出码 ${rc}, 完整日志: ${LOG}"
 
-# 把 CANN 侧的打点与 trap 信息汇总到仓库目录下, 方便直接查看
-hit="$(grep -rl '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" 2>/dev/null | head -3)"
-if [ -n "$hit" ]; then
-  grep -rh '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" 2>/dev/null | tail -40 > logs/last-trace.log
-  echo "[run] 打点汇总: logs/last-trace.log (共 $(grep -rh '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" 2>/dev/null | wc -l) 行)"
+# 打点可能落在 CANN 日志目录(PRINT_TO_STDOUT=0)或进程输出(VERBOSE=1), 两处都收
+grep -rh '\[ln\]' "$ASCEND_PROCESS_LOG_PATH" "$LOG" 2>/dev/null | tail -200 > logs/last-trace.log
+trace_cnt=$(wc -l < logs/last-trace.log 2>/dev/null || echo 0)
+if [ "${trace_cnt}" -gt 0 ]; then
+  echo "[run] 打点汇总 logs/last-trace.log (${trace_cnt} 行), 最后 20 行:"
+  tail -20 logs/last-trace.log
 else
-  echo "[run] CANN 日志中没有 [ln] 打点; 检查: grep -r 'MTE_ERR\|FIX_ERR\|trap' $ASCEND_PROCESS_LOG_PATH | tail"
+  echo "[run] 没抓到 [ln] 打点; 查 trap: grep -r 'MTE_ERR\|FIX_ERR\|aicore error\|trap' $ASCEND_PROCESS_LOG_PATH | tail -20"
 fi
 exit "$rc"
