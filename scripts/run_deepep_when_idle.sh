@@ -21,6 +21,7 @@ MASTER_IP="${MASTER_IP:-61.47.19.68}"         # 主节点 IP(本机)
 SLAVE_IP="${SLAVE_IP:-61.47.19.69}"           # 从节点 IP
 SSH_USER="${SSH_USER:-root}"                  # 从节点 ssh 用户
 SSH_PORT="${SSH_PORT:-22}"
+SSH_OPTS="${SSH_OPTS:--p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=10}"
 WORKDIR="${WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WORKDIR_SLAVE="${WORKDIR_SLAVE:-$WORKDIR}"    # 从节点上的同一工程目录
 RUN_CMD="${RUN_CMD:-bash tests/python/deepep/run_test_internode_a3.sh}"
@@ -45,6 +46,9 @@ while getopts ":nlh" opt; do
 done
 
 log() { echo "[$(date '+%F %T')] $*"; }
+
+# 统一走这里，便于替换认证方式(如改用 -i 指定私钥)
+remote_sh() { ssh $SSH_OPTS "$SSH_USER@$SLAVE_IP" "$1"; }
 
 # 解析 npu-smi info 的进程表，输出 "pid name"。
 # A3 布局: | npu chip | pid | name | memory |；老布局: | npu pid | name | memory |
@@ -83,8 +87,7 @@ proc_busy_remote_from_stdin() {
     local pid name
     while read -r pid name; do
         [[ -n "$IGNORE_PROC" && "$name" =~ $IGNORE_PROC ]] && continue
-        if ssh -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=5 "$SSH_USER@$SLAVE_IP" \
-            "test -d /proc/$pid && ! awk '{print \$3}' /proc/$pid/stat 2>/dev/null | grep -qx Z" \
+        if remote_sh "test -d /proc/$pid && ! awk '{print \$3}' /proc/$pid/stat 2>/dev/null | grep -qx Z" \
             >/dev/null 2>&1; then
             return 0
         fi
@@ -132,13 +135,25 @@ log "占用判定: $BUSY_RULE"$([[ "$BUSY_RULE" == "hbm" ]] && echo " (显存阈
 log "轮询 ${POLL_INTERVAL}s，连续空闲 ${IDLE_TIMES} 次后启动$([[ $DRY_RUN == 1 ]] && echo ' (演练模式)')"
 [[ "$LOCAL_ONLY" == "1" ]] && log "本机模式: 只检测本机 NPU，不 ssh 对端"
 
+# ssh 模式先探一次，不通就直接给出修复提示，避免无意义轮询
+if [[ "$LOCAL_ONLY" == "0" ]]; then
+    if ! probe_out="$(remote_sh 'npu-smi info' 2>&1)"; then
+        log "ssh 到从节点失败: ${probe_out##*$'\n'}"
+        log "请在主节点上配置免密后重试:"
+        log "  ssh-copy-id -p $SSH_PORT $SSH_USER@$SLAVE_IP"
+        log "  ssh -p $SSH_PORT -o BatchMode=yes $SSH_USER@$SLAVE_IP 'npu-smi info'"
+        log "若端口/用户不同: SSH_USER=xxx SSH_PORT=yyy ./scripts/run_deepep_when_idle.sh"
+        exit 2
+    fi
+    log "ssh 到从节点正常"
+fi
+
 idle_streak=0
 while true; do
     local_out="$(npu-smi info 2>/dev/null || true)"
     remote_out=""
     if [[ "$LOCAL_ONLY" == "0" ]]; then
-        remote_out="$(ssh -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=5 \
-            "$SSH_USER@$SLAVE_IP" 'npu-smi info' 2>/dev/null || true)"
+        remote_out="$(remote_sh 'npu-smi info' 2>/dev/null || true)"
     fi
 
     if [[ -z "$local_out" ]]; then
@@ -238,7 +253,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 log "先在从节点拉起任务"
-ssh -p "$SSH_PORT" "$SSH_USER@$SLAVE_IP" "$remote_cmd" || { log "从节点拉起失败"; exit 1; }
+remote_sh "$remote_cmd" || { log "从节点拉起失败"; exit 1; }
 sleep "$START_DELAY"
 log "在主节点拉起任务"
 eval "$local_cmd"
