@@ -43,14 +43,25 @@ static_assert(CACHE_LINE_ISOLATION_BYTES % AscendC::CACHE_LINE_SIZE == 0U,
 // that faulted, and a marker with no following stage means that stage hung.
 // Inside a stage, TracePoint(id, detail) marks single statements. Its id is
 // "stage * 100 + step", so grep "tp 402" in this file lands on the exact line,
-// and it prints the calling AIV, so a hang in a per-core loop also names the
-// core and the loop index that never came back. Keep the added points few and
-// terse: kernel printf has a small per-core buffer and the last line printed
-// is what identifies the fault on a trap.
+// and it prints the calling AIV (only the first kDebugAivCount cores print, see
+// below), so a hang in a per-core loop also names the core and the loop index
+// that never came back. Keep the added points few and terse: kernel printf has
+// a small per-core buffer and the last line printed is what identifies the
+// fault on a trap.
 // Compile with -DDEEPEP_LAYERED_DEBUG_LOG=0 to drop every print.
 #ifndef DEEPEP_LAYERED_DEBUG_LOG
 #define DEEPEP_LAYERED_DEBUG_LOG 1
 #endif
+
+// Only the first DEEPEP_LAYERED_DEBUG_AIVS AIVs emit TracePoints. The
+// per-server work is owned by AIV 0..serverNum-1, so the default keeps exactly
+// the cores that drive RDMA and drops the per-slice repeats that otherwise
+// evict the earliest lines (boot/init/stage) from the small per-core buffer.
+// Build with -DDEEPEP_LAYERED_DEBUG_AIVS=<aivNum> to trace every core again.
+#ifndef DEEPEP_LAYERED_DEBUG_AIVS
+#define DEEPEP_LAYERED_DEBUG_AIVS 2U
+#endif
+constexpr uint32_t kDebugAivCount = DEEPEP_LAYERED_DEBUG_AIVS;
 
 #if DEEPEP_LAYERED_DEBUG_LOG
 #define LAYERED_LOG(...) printf(__VA_ARGS__)
@@ -84,13 +95,17 @@ public:
 
     // Fine-grained marker for statements *inside* a stage. Unlike
     // StageBoundary it does not synchronise cores, so it can be dropped
-    // anywhere, and it prints from every AIV that reaches it: the last line in
-    // the device log then names the exact statement that faulted (507035) or
-    // hung, plus the core and loop index when `detail` carries one.
+    // anywhere, and it prints from the first kDebugAivCount AIVs that reach it:
+    // the last line in the device log then names the exact statement that
+    // faulted (507035) or hung, plus the core and loop index when `detail`
+    // carries one.
     // The id encodes "stage * 100 + step": grep "tp 402" finds the call site.
     __aicore__ inline void TracePoint(uint32_t point, uint32_t detail)
     {
 #if DEEPEP_LAYERED_DEBUG_LOG
+        if (static_cast<uint32_t>(GetBlockIdx()) >= kDebugAivCount) {
+            return;
+        }
         // Drain this core's pipelines so the marker is ordered after the
         // memory traffic that precedes it and before the one that follows.
         PipeBarrier<PIPE_ALL>();
@@ -766,11 +781,18 @@ private:
             // 目的位置
             auto *dst = in + off;
             auto *remoteFlag = (__gm__ uint64_t *)(in + flagOff);
+            // Split the payload and flag submissions so a stall in either WQE
+            // names itself instead of both collapsing into a missing 702.
+            TracePoint(703U, proxyRank);
             if (proxyRank == info_.epRankId) {
                 CopyWindowBytes(payload, dst, layout_.controlStride);
-                CopyWindowFlag(remoteFlag, *flag);
             } else {
                 comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
+            }
+            TracePoint(704U, target);
+            if (proxyRank == info_.epRankId) {
+                CopyWindowFlag(remoteFlag, *flag);
+            } else {
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, proxyRank, *doorbell_, *head_);
             }
         }
