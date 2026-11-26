@@ -5,6 +5,7 @@
 #include "hccl/hccl_res.h"
 
 #include <acl/acl_rt.h>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <map>
@@ -343,6 +344,10 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     if (ret != HCCL_SUCCESS) {
         return ret;
     }
+    // Host-side milestones. The kernel emits nothing until the op is launched,
+    // so the last "[ln-host] stage=" line names the step that blocked/failed.
+    std::fprintf(stderr, "[ln-host] create rank=%u world=%u rps=%u proto=%u\n", rankInfo.rank, rankInfo.world,
+                 ranksPerServer, static_cast<uint32_t>(protocol));
 
     const uint64_t requestedBytes = GetPayloadCapacity();
     if (requestedBytes < minimumWindowBytes) {
@@ -381,6 +386,8 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
             return ret;
         }
     }
+    std::fprintf(stderr, "[ln-host] stage=window ok bytes=%llu\n",
+                 static_cast<unsigned long long>(shared->payloadBytes));
 
     if (!shared->hostReady) {
         CamMoeLayeredCommContext host{};
@@ -391,11 +398,13 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
         shared->host = host;
         shared->hostReady = true;
     }
+    std::fprintf(stderr, "[ln-host] stage=channels ok\n");
 
     ret = PublishEngineContext(comm, contextTag, shared->host, contextExists, engineContext);
     if (ret != HCCL_SUCCESS) {
         return ret;
     }
+    std::fprintf(stderr, "[ln-host] stage=engine ok ptr=%p\n", engineContext);
     shared->contextReady = true;
     FillResource(*shared, engineContext, resource);
     return HCCL_SUCCESS;

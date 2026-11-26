@@ -1,5 +1,6 @@
 #include <memory>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -790,6 +791,10 @@ Buffer::internode_dispatch(const torch::Tensor &x, const std::optional<torch::Te
         auto plan = at::empty({plan_layout.total}, int_options);
         auto expert_total = at::empty({1}, int_options);
         const int64_t epoch = static_cast<int64_t>(++layered_epoch);
+        // Host-side launch marker: distinguishes "op never launched" from
+        // "launched but the kernel printed nothing".
+        std::fprintf(stderr, "[ln-host] launch notify rank=%lld epoch=%lld ctx=%p\n", static_cast<long long>(rank),
+                     static_cast<long long>(epoch), layered_context.data_ptr());
         EXEC_NPU_CMD(aclnnNotifyDispatchNormalLayered, layered_context, expert_ids, hcom_ep_name, num_ranks, rank,
                      num_nvl_ranks, num_experts, slots_per_server, epoch, hidden, max_bs, expert_alignment,
                      recv_tokens_per_expert_i32, plan, expert_total);
