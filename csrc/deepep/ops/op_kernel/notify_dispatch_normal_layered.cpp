@@ -823,6 +823,15 @@ private:
             } else {
 #if DEEPEP_LAYERED_DEBUG_LOG
                 if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
+                    // Zero-dereference descriptor view first: it survives even when
+                    // the QP entry itself cannot be read.
+                    uint64_t qpInfo = 0U;
+                    uint32_t qpNum = 0U;
+                    uint32_t qpSize = 0U;
+                    uint64_t qpAddr = 0U;
+                    comm_.LoadQpDesc(proxyRank, qpInfo, qpNum, qpSize, qpAddr);
+                    LAYERED_LOG("[ln] qp dst=%u info=%x num=%u size=%u addr=%x\n", proxyRank,
+                                static_cast<uint32_t>(qpInfo), qpNum, qpSize, static_cast<uint32_t>(qpAddr));
                     uint32_t qpHead = 0U;
                     uint32_t qpTail = 0U;
                     uint32_t qpDepth = 0U;

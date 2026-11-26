@@ -199,6 +199,32 @@ public:
         return PostRdmaSend(localFlag, remoteFlag, dstRank, sizeof(uint64_t), doorbellUb, headUb, timeoutCycles);
     }
 
+    // Debug helper: zero-dereference view of the AiRMA descriptor layout for
+    // dstRank. The base pointer is only dereferenced when it is non-null, so a
+    // missing transport context reports zeros instead of faulting.
+    __aicore__ inline void LoadQpDesc(uint32_t dstRank, uint64_t &infoPtr, uint32_t &qpNum, uint32_t &qpSize,
+                                      uint64_t &qpAddr) const
+    {
+#ifndef __DAV_C310__
+        infoPtr = reinterpret_cast<uint64_t>(rdmaInfo_);
+        qpNum = 0U;
+        qpSize = 0U;
+        qpAddr = 0U;
+        if (infoPtr != 0U) {
+            qpNum = rdmaInfo_->qpNum;
+            qpSize = rdmaInfo_->sizeOfAiRMAWQ;
+            qpAddr = reinterpret_cast<uint64_t>(rdmaInfo_->sqPtr) +
+                     static_cast<uint64_t>(dstRank) * static_cast<uint64_t>(qpNum) * static_cast<uint64_t>(qpSize);
+        }
+#else
+        (void)dstRank;
+        (void)infoPtr;
+        (void)qpNum;
+        (void)qpSize;
+        (void)qpAddr;
+#endif
+    }
+
     // Debug helper: snapshot of the AiRMA SQ flow-control words for dstRank.
     // head is the producer index this kernel maintains; tail is advanced by the
     // transport when WQEs complete. A frozen tail is what turns the queue-space
