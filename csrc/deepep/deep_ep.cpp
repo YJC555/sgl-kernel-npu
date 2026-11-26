@@ -147,7 +147,11 @@ Buffer::Buffer(int64_t rank, int64_t num_ranks, int64_t num_nvl_bytes, int64_t n
         LayeredCommResource resource;
         const HcclResult contextRet = layered_context_manager->Create(
             layeredComm, contextTag, layered_protocol, static_cast<uint32_t>(num_nvl_ranks), 1U, resource);
-        HCCL_CHECK(contextRet);
+        if (contextRet != HCCL_SUCCESS) {
+            throw EPException("HCCL Assertion", __FILE__, __LINE__,
+                              "layered Create step=" + layered_context_manager->LastStep() + " ret=" +
+                                  std::to_string(static_cast<int>(contextRet)));
+        }
         layered_window_bytes = resource.windowBytes;
         const int64_t elements =
             static_cast<int64_t>((sizeof(CamMoeLayeredCommContext) + sizeof(int32_t) - 1U) / sizeof(int32_t));

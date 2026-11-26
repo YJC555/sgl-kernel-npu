@@ -27,6 +27,16 @@ public:
 
     HcclResult Create(HcclComm comm, const std::string &contextTag, CamMoeLayeredProtocol protocol,
                       uint32_t ranksPerServer, uint64_t minimumWindowBytes, LayeredCommResource &resource);
+
+    // Name of the step that Create() stopped at, so the caller can put it into
+    // the exception message instead of relying on log files.
+    const std::string &LastStep() const
+    {
+        return lastStep_;
+    }
+
+private:
+    std::string lastStep_ = "none";
 };
 
 }  // namespace deep_ep
