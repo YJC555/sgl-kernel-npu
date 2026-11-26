@@ -5,6 +5,7 @@
 #include "hccl/hccl_res.h"
 
 #include <acl/acl_rt.h>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -20,6 +21,27 @@ namespace deep_ep {
 namespace {
 constexpr uint64_t kDefaultPayloadBytes = 200ULL * 1024ULL * 1024ULL;
 constexpr uint64_t kMiB = 1024ULL * 1024ULL;
+
+// Host-side milestones go to stderr and to a file, so the trace survives
+// launchers that swallow or redirect one of the two streams.
+void HostTrace(const char *fmt, ...)
+{
+    char buffer[512] = {};
+    va_list args;
+    va_start(args, fmt);
+    const int written = std::vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+    if (written <= 0) {
+        return;
+    }
+    std::fprintf(stderr, "[ln-host] %s\n", buffer);
+    std::fflush(stderr);
+    std::FILE *fp = std::fopen("/tmp/deepep_layered_host.log", "a");
+    if (fp != nullptr) {
+        std::fprintf(fp, "[ln-host] %s\n", buffer);
+        std::fclose(fp);
+    }
+}
 
 struct SharedLayeredWindow {
     std::mutex mutex;
@@ -337,25 +359,30 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
 {
     if (comm == nullptr || ranksPerServer == 0U || minimumWindowBytes == 0U ||
         (protocol != CAM_MOE_LAYERED_PROTOCOL_ROCE && protocol != CAM_MOE_LAYERED_PROTOCOL_UBOE)) {
+        HostTrace("fail step=args comm=%p rps=%u minBytes=%llu proto=%u", comm, ranksPerServer,
+                  static_cast<unsigned long long>(minimumWindowBytes), static_cast<uint32_t>(protocol));
         return HCCL_E_PARA;
     }
+    HostTrace("enter comm=%p tag=%s rps=%u minBytes=%llu proto=%u", comm, contextTag.c_str(), ranksPerServer,
+              static_cast<unsigned long long>(minimumWindowBytes), static_cast<uint32_t>(protocol));
     CommRankInfo rankInfo{};
     HcclResult ret = GetCommRankInfo(comm, ranksPerServer, rankInfo);
     if (ret != HCCL_SUCCESS) {
+        HostTrace("fail step=rankinfo code=%d", static_cast<int>(ret));
         return ret;
     }
-    // Host-side milestones. The kernel emits nothing until the op is launched,
-    // so the last "[ln-host] stage=" line names the step that blocked/failed.
-    std::fprintf(stderr, "[ln-host] create rank=%u world=%u rps=%u proto=%u\n", rankInfo.rank, rankInfo.world,
-                 ranksPerServer, static_cast<uint32_t>(protocol));
+    HostTrace("rankinfo rank=%u world=%u", rankInfo.rank, rankInfo.world);
 
     const uint64_t requestedBytes = GetPayloadCapacity();
     if (requestedBytes < minimumWindowBytes) {
+        HostTrace("fail step=payload req=%llu min=%llu", static_cast<unsigned long long>(requestedBytes),
+                  static_cast<unsigned long long>(minimumWindowBytes));
         return HCCL_E_MEMORY;
     }
     const uint64_t maxTag = 255U;
     const std::string memTag = contextTag + "_buffer";
     if (contextTag.size() > maxTag || memTag.size() > maxTag) {
+        HostTrace("fail step=tag len=%zu", memTag.size());
         return HCCL_E_PARA;
     }
 
@@ -365,8 +392,10 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     bool contextExists = false;
     ret = GetExistingEngineContext(comm, contextTag, engineContext, contextExists);
     if (ret != HCCL_SUCCESS) {
+        HostTrace("fail step=engine-get code=%d", static_cast<int>(ret));
         return ret;
     }
+    HostTrace("engine-get exists=%d ptr=%p", contextExists ? 1 : 0, engineContext);
     if (!contextExists && shared->contextReady) {
         return HCCL_E_NOT_FOUND;
     }
@@ -374,6 +403,7 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     ret = ValidateSharedWindow(*shared, contextTag, rankInfo, ranksPerServer, protocol, requestedBytes,
                                minimumWindowBytes, contextExists);
     if (ret != HCCL_SUCCESS) {
+        HostTrace("fail step=validate code=%d", static_cast<int>(ret));
         return ret;
     }
     if (shared->buffer != nullptr && contextExists && shared->contextReady) {
@@ -383,28 +413,31 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     if (shared->buffer == nullptr) {
         ret = AllocateAndRegisterWindow(comm, memTag, requestedBytes, rankInfo, ranksPerServer, protocol, *shared);
         if (ret != HCCL_SUCCESS) {
+            HostTrace("fail step=window code=%d bytes=%llu", static_cast<int>(ret),
+                      static_cast<unsigned long long>(requestedBytes));
             return ret;
         }
     }
-    std::fprintf(stderr, "[ln-host] stage=window ok bytes=%llu\n",
-                 static_cast<unsigned long long>(shared->payloadBytes));
+    HostTrace("stage=window ok bytes=%llu", static_cast<unsigned long long>(shared->payloadBytes));
 
     if (!shared->hostReady) {
         CamMoeLayeredCommContext host{};
         ret = BuildHostContext(comm, memTag, rankInfo, ranksPerServer, protocol, *shared, host);
         if (ret != HCCL_SUCCESS) {
+            HostTrace("fail step=channels code=%d", static_cast<int>(ret));
             return ret;
         }
         shared->host = host;
         shared->hostReady = true;
     }
-    std::fprintf(stderr, "[ln-host] stage=channels ok\n");
+    HostTrace("stage=channels ok");
 
     ret = PublishEngineContext(comm, contextTag, shared->host, contextExists, engineContext);
     if (ret != HCCL_SUCCESS) {
+        HostTrace("fail step=engine code=%d", static_cast<int>(ret));
         return ret;
     }
-    std::fprintf(stderr, "[ln-host] stage=engine ok ptr=%p\n", engineContext);
+    HostTrace("stage=engine ok ptr=%p", engineContext);
     shared->contextReady = true;
     FillResource(*shared, engineContext, resource);
     return HCCL_SUCCESS;

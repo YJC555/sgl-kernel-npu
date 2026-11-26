@@ -133,6 +133,8 @@ Buffer::Buffer(int64_t rank, int64_t num_ranks, int64_t num_nvl_bytes, int64_t n
         char contextGroup[HCOMM_NAME_LEN] = {};
         if (!moe_all_to_all_group_name.empty() && HcomGetCommHandleByGroup != nullptr) {
             HCCL_CHECK(HcomGetCommHandleByGroup(moe_all_to_all_group_name.c_str(), &layeredComm));
+            std::fprintf(stderr, "[ln-host] group=%s comm=%p\n", moe_all_to_all_group_name.c_str(),
+                         static_cast<void *>(layeredComm));
             std::memcpy(contextGroup, moe_all_to_all_group_name.data(), moe_all_to_all_group_name.size() + 1U);
         } else {
             EP_HOST_ASSERT_S(moe_all_to_all_group_name.empty(), "normal layered",
