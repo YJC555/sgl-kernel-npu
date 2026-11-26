@@ -124,10 +124,12 @@ Buffer::Buffer(int64_t rank, int64_t num_ranks, int64_t num_nvl_bytes, int64_t n
     }
 
 #if DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
-    // The layered data plane needs an AIV engine context on the communication
-    // domain that the ops are bound to. Creating it is what makes HCCL publish
-    // the AI-RMA QP table (aiRMAInfo) that the A3 kernels consume.
-    const bool layeredEngineSoc = soc_version == op::SocVersion::ASCEND950 || soc_version == op::SocVersion::ASCEND910_93;
+    // The layered A5 data plane runs over hcomm channels and needs this AIV
+    // engine context on the communication domain the ops are bound to.
+    // A3 (910_93) cannot create it: HcclEngineCtxGet(COMM_ENGINE_AIV) returns
+    // HCCL_E_PARA there, so HCCL never publishes an AI-RMA QP table.  The A3
+    // kernel writes the peer windows directly instead and ignores roceContext.
+    const bool layeredEngineSoc = soc_version == op::SocVersion::ASCEND950;
     if (layered_mode && layeredEngineSoc) {
         HcclComm layeredComm = ep_comm;
         char contextGroup[HCOMM_NAME_LEN] = {};
@@ -147,11 +149,7 @@ Buffer::Buffer(int64_t rank, int64_t num_ranks, int64_t num_nvl_bytes, int64_t n
         LayeredCommResource resource;
         const HcclResult contextRet = layered_context_manager->Create(
             layeredComm, contextTag, layered_protocol, static_cast<uint32_t>(num_nvl_ranks), 1U, resource);
-        if (contextRet != HCCL_SUCCESS) {
-            throw EPException("HCCL Assertion", __FILE__, __LINE__,
-                              "layered Create step=" + layered_context_manager->LastStep() + " ret=" +
-                                  std::to_string(static_cast<int>(contextRet)));
-        }
+        HCCL_CHECK(contextRet);
         layered_window_bytes = resource.windowBytes;
         const int64_t elements =
             static_cast<int64_t>((sizeof(CamMoeLayeredCommContext) + sizeof(int32_t) - 1U) / sizeof(int32_t));

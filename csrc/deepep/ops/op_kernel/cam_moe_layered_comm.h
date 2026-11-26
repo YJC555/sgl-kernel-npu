@@ -87,6 +87,18 @@ public:
     {
         return GetWinSize(context_);
     }
+    // A3 (910_93) never receives an AI-RMA QP table: HCCL answers
+    // HcclEngineCtxGet(COMM_ENGINE_AIV) with HCCL_E_PARA there.  Peer windows are
+    // still HCCS-mapped GM, so every "send" becomes a plain copy into the peer
+    // window.  A5 keeps using the hcomm channels.
+    __aicore__ inline bool DirectWindowWrite() const
+    {
+#ifdef __DAV_C310__
+        return false;
+#else
+        return true;
+#endif
+    }
     // Debug helper: snapshot of a peer relation resource with a null guard, so a
     // missing remote entry reports 0 instead of faulting on the dereference.
     __aicore__ inline void LoadPeerWindow(uint32_t rank, uint64_t &nextDevPtr, uint64_t &windowIn) const

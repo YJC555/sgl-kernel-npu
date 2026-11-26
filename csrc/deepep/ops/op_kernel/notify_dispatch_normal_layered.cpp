@@ -818,7 +818,7 @@ private:
                             static_cast<uint32_t>(reinterpret_cast<uint64_t>(payload)), layout_.controlStride);
             }
 #endif
-            if (proxyRank == info_.epRankId) {
+            if (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
                 CopyWindowBytes(payload, dst, layout_.controlStride);
             } else {
 #if DEEPEP_LAYERED_DEBUG_LOG
@@ -842,7 +842,7 @@ private:
                 comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
             }
             TracePoint(704U, target);
-            if (proxyRank == info_.epRankId) {
+            if (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
                 CopyWindowFlag(remoteFlag, *flag);
             } else {
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, proxyRank, *doorbell_, *head_);
@@ -1112,7 +1112,7 @@ private:
             // [ownerInServer][localExpert]
             auto *dst = sin + BaseAckLaneOffset(layout_, info_.epWorldSize, source, sourceServer_);
             TracePoint(1301U, sourceServer);
-            if (source == info_.epRankId) {
+            if (source == info_.epRankId || comm_.DirectWindowWrite()) {
                 CopyWindowBytes(ack, dst, layout_.baseAckStride);
             } else {
                 comm_.PostRdmaSend(ack, dst, source, layout_.baseAckStride, *doorbell_, *head_);
@@ -1125,7 +1125,7 @@ private:
             cacheWriteThrough((__gm__ uint8_t *)flag, sizeof(uint64_t));
             auto *remoteFlag =
                 (__gm__ uint64_t *)(sin + BaseAckFlagOffset(layout_, info_.epWorldSize, source, sourceServer_));
-            if (source == info_.epRankId) {
+            if (source == info_.epRankId || comm_.DirectWindowWrite()) {
                 CopyWindowFlag(remoteFlag, *flag);
             } else {
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, source, *doorbell_, *head_);
