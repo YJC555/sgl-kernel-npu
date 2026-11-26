@@ -62,7 +62,7 @@ echo "[run] 已启动 pid=$test_pid (完整输出进日志, 终端只显示关�
 
 # 只把打点/配置/错误行实时回显到终端, INFO 不进终端
 tail -n +1 -f "$LOG" 2>/dev/null \
-  | grep --line-buffered -E '\[ln\]|\[config\]|routing|ERROR|Error|failed|Failed|invalid|trap|exception|aclnn' &
+  | grep --line-buffered -E '\[ln\]|\[ln-host\]|\[config\]|routing|ERROR|Error|failed|Failed|invalid|trap|exception|aclnn' &
 filter_pid=$!
 
 wait "$test_pid"
