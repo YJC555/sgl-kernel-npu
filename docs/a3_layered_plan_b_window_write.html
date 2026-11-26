@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A3 分层通信：方案 A vs 方案 B（窗口直写）</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --panel:#ffffff; --ink:#1b2230; --ink-2:#4b5668; --ink-3:#7a8699;
+    --line:#e3e7ef; --brand:#1d4ed8; --brand-2:#0e7490; --ok:#067647; --warn:#b42318;
+    --code-bg:#101826; --code-ink:#d7e2f4; --accent:#eef3ff;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    line-height:1.75; font-size:15.5px;
+  }
+  a{color:var(--brand); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 28px 80px;}
+  header.hero{
+    background:linear-gradient(135deg,#0b1220 0%,#152a4d 55%,#0e3b52 100%);
+    color:#eaf1ff; padding:52px 28px 44px; margin-bottom:34px;
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  header.hero .inner{max-width:1120px; margin:0 auto;}
+  .eyebrow{font-size:12.5px; letter-spacing:.16em; text-transform:uppercase; color:#7fb3ff; margin-bottom:12px;}
+  header.hero h1{margin:0 0 12px; font-size:31px; letter-spacing:.5px; font-weight:650;}
+  header.hero p.sub{margin:0; color:#a9bcd8; font-size:15px; max-width:820px;}
+  .meta{display:flex; flex-wrap:wrap; gap:10px; margin-top:22px;}
+  .meta span{
+    font-size:12.5px; color:#c8d8f0; background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.14); padding:4px 11px; border-radius:999px;
+  }
+  h2{
+    font-size:21px; margin:44px 0 14px; padding-left:12px; border-left:4px solid var(--brand);
+    letter-spacing:.3px;
+  }
+  h3{font-size:16.5px; margin:26px 0 10px; color:#111a2b;}
+  h4{font-size:14.5px; margin:18px 0 8px; color:var(--ink-2);}
+  p{margin:10px 0;}
+  ul,ol{margin:10px 0 10px 22px; padding:0;}
+  li{margin:5px 0;}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; margin:22px 0 8px;}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 18px 16px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04);
+  }
+  .card .tag{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3);}
+  .card h4{margin:6px 0 8px; font-size:15.5px; color:var(--ink);}
+  .card p{margin:0; font-size:13.8px; color:var(--ink-2);}
+  .card.bad{border-left:4px solid var(--warn);}
+  .card.good{border-left:4px solid var(--ok);}
+  .card.info{border-left:4px solid var(--brand);}
+  table{
+    width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden;
+  }
+  th,td{padding:10px 13px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line);}
+  th{background:#f0f4fb; font-weight:600; color:#22304a; font-size:13.5px;}
+  tr:last-child td{border-bottom:none;}
+  td code, p code, li code{background:#eef2f8; color:#123; padding:1px 6px; border-radius:5px; font-size:12.8px;}
+  pre{
+    background:var(--code-bg); color:var(--code-ink); padding:16px 18px; border-radius:10px;
+    overflow-x:auto; font-size:12.9px; line-height:1.65;
+    font-family:"JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
+    border:1px solid #1d2b45;
+  }
+  pre .c{color:#7f93b3;}
+  pre .k{color:#ff9d6b;}
+  pre .s{color:#8fe3a4;}
+  .note{
+    background:var(--accent); border:1px solid #d6e2ff; border-left:4px solid var(--brand);
+    border-radius:10px; padding:14px 16px; margin:16px 0; font-size:14px;
+  }
+  .warnbox{
+    background:#fff6f5; border:1px solid #fbd5d0; border-left:4px solid var(--warn);
+    border-radius:10px; padding:14px 16px; margin:16px 0; font-size:14px;
+  }
+  .okbox{
+    background:#f2fbf6; border:1px solid #cdeeda; border-left:4px solid var(--ok);
+    border-radius:10px; padding:14px 16px; margin:16px 0; font-size:14px;
+  }
+  .kbd{
+    display:inline-block; background:#fff; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:6px; padding:0 6px; font-family:monospace; font-size:12.5px;
+  }
+  .fig{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:18px 16px 10px; margin:20px 0; text-align:center;
+  }
+  .fig svg{max-width:100%; height:auto;}
+  .fig .cap{font-size:12.8px; color:var(--ink-3); margin-top:8px;}
+  .qa{border-left:3px solid var(--brand-2); padding-left:16px; margin:18px 0;}
+  .qa .q{font-weight:650; color:#0e3b52;}
+  .tocbox{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 20px;
+  }
+  .tocbox ol{margin:6px 0 0 18px;}
+  .tocbox a{color:var(--ink-2);}
+  footer{margin-top:52px; padding-top:18px; border-top:1px solid var(--line); color:var(--ink-3); font-size:13px;}
+  @media print{
+    body{background:#fff;}
+    header.hero{background:#0b1220 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+    pre{white-space:pre-wrap; word-break:break-all;}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="inner">
+    <div class="eyebrow">DeepEP · A3 双机分层通信 · 技术说明</div>
+    <h1>A3 分层通信：方案 A（AI-RMA QP）与方案 B（窗口直写）</h1>
+    <p class="sub">
+      本文说明 A3（910_93）双机 32 卡 layered dispatch 在 stage 6/7 挂死的原因，对比“AIV 核直接发 RoCE WQE”与“直接写对端窗口”两条数据面实现，
+      并解释为什么 A5 可行、A3 不可行，以及窗口直写在跨节点场景下为什么依然有效。
+    </p>
+    <div class="meta">
+      <span>分支：a5_layered</span>
+      <span>关键提交：6f10fc4</span>
+      <span>平台：Ascend 910_93 × 2（2 × 16 卡）</span>
+      <span>算子：notify_dispatch_normal_layered</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="tocbox">
+    <strong>目录</strong>
+    <ol>
+      <li><a href="#s1">问题现象与定位结论</a></li>
+      <li><a href="#s2">方案 A 与方案 B 总览</a></li>
+      <li><a href="#s3">为什么方案 A 在 A3 不行</a></li>
+      <li><a href="#s4">为什么方案 B 可以</a></li>
+      <li><a href="#s5">A5 支持、A3 不支持的原因</a></li>
+      <li><a href="#s6">关键问答：DataCopy 走的是 RoCE 而不是 HCCS，为什么能用</a></li>
+      <li><a href="#s7">方案 B 的具体实现</a></li>
+      <li><a href="#s8">算法与拓扑不变：本地聚合仍然保留</a></li>
+      <li><a href="#s9">代价、风险与验证方法</a></li>
+      <li><a href="#s10">附录：提交与文件索引</a></li>
+    </ol>
+  </div>
+
+  <div class="cards">
+    <div class="card bad">
+      <div class="tag">结论一</div>
+      <h4>方案 A 在 A3 不可用</h4>
+      <p><code>HcclEngineCtxGet(..., COMM_ENGINE_AIV, ...)</code> 在 910_93 返回 <code>HCCL_E_PARA(1)</code>，HCCL 不会向 MC2 算子下发 <code>aiRMAInfo</code>（QP 表），kernel 侧无 WQE 可拼。</p>
+    </div>
+    <div class="card good">
+      <div class="tag">结论二</div>
+      <h4>方案 B 可落地且语义等价</h4>
+      <p>把“发 RDMA WQE”换成“写 <code>WindowIn(peer)</code> 窗口地址 + flag”。接收侧代码零改动，先 payload 后 flag 的可见性语义与原设计一致。</p>
+    </div>
+    <div class="card info">
+      <div class="tag">结论三</div>
+      <h4>算法与拓扑不变</h4>
+      <p>14 个阶段、本地聚合（stage 7）、server 内扇出、ack 回传全部保留；A5 路径零影响。变化只发生在“最后一公里”的搬运指令。</p>
+    </div>
+  </div>
+
+  <h2 id="s1">1. 问题现象与定位结论</h2>
+
+  <h3>1.1 现象</h3>
+  <p>A3 双机（2 × 16 卡，共 32 卡）运行 layered dispatch，notify 算子卡在 stage 6 / stage 7：</p>
+  <ul>
+    <li>主节点：AIV0 打出 <code>701 → 703 → 704 → 702 → stage 7</code>，AIV1 只打出 <code>701</code> 后停住；</li>
+    <li>从节点：现象相反（AIV1 走完全程，AIV0 停在 <code>701</code>）；</li>
+    <li>两台机器的其余核卡在 <code>StageBoundary(7)</code> 的 <code>SyncAll</code>，互相等待，进程挂死。</li>
+  </ul>
+
+  <h3>1.2 日志证据</h3>
+<pre><span class="c">[ln] ctx sz=32 winMB=3000 localIn=80000000</span>
+<span class="c">[ln] ctx same r=0  ptr=c1faf000 win=0</span>
+<span class="c">[ln] ctx peer r=31 ptr=c05f8000 win=80000000</span>   <span class="c">&lt;-- 对端窗口地址正常</span>
+<span class="c">[ln] tp 703 aiv 1 v 31</span>
+<span class="c">[ln] ctl self=1 proxy=31 rps=16 inSrv=1</span>
+<span class="c">[ln] qp dst=31 info=0 num=0 size=0 addr=0</span>          <span class="c">&lt;-- QP 描述符为空</span>
+</pre>
+
+  <p>窗口侧（<code>WindowIn</code>）全部正常，唯一缺口是 <code>context_-&gt;aiRMAInfo == 0</code>，即 MC2 算子的 op param 里没有 AI-RMA 的 QP 表。</p>
+  <p>A3 分支的 <code>PostRdmaSend</code> 第一句就是 <code>rdmaInfo_-&gt;qpNum</code>，空指针解引用后该 AIV 核直接 trap，所以 <code>704/702</code> 不再出现，另一核卡在 <code>SyncAll</code>。</p>
+
+  <div class="okbox">
+    <strong>定位结论：</strong>stage 6 的“跨节点发送核”在 <code>PostRdmaSend</code> 之前就异常退出，导致 stage 7 的 <code>SyncAll</code> 永远无法收敛。根因不是算法，也不是窗口，而是 QP 表缺失。
+  </div>
+
+  <h2 id="s2">2. 方案 A 与方案 B 总览</h2>
+
+  <table>
+    <thead>
+      <tr><th style="width:18%">维度</th><th>方案 A（原设计）</th><th>方案 B（本次采用）</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>发送动作</td><td>AIV 核构造 <code>hns_roce_rc_sq_wqe</code>、写 tail、敲 doorbell</td><td>AIV 核对 <code>WindowIn(peer)</code> 地址做 <code>DataCopyPad</code>，再写 flag</td></tr>
+      <tr><td>依赖数据</td><td><code>aiRMAInfo</code>：QP 号、SQ 地址、WQ 深度、远端 mem key</td><td>仅需 HCCL 注册窗口地址（<code>windowsIn</code>）</td></tr>
+      <tr><td>谁拼网络包</td><td>kernel 自己拼 WQE，网卡按 WQE 发包</td><td>HCCL 传输层完成封装与发送</td></tr>
+      <tr><td>同步性</td><td>异步：提交后核立即返回</td><td>同步：搬完才返回，占用本核 MTE3</td></tr>
+      <tr><td>A3 可行性</td><td class="bad">不可行（HCCL 返回 E_PARA）</td><td class="good">可行（仓库既有 A3 dispatch/combine 即此法）</td></tr>
+      <tr><td>A5 可行性</td><td class="good">可行（hcomm/AIV 引擎）</td><td>可行但无必要，保持原路径</td></tr>
+      <tr><td>接收侧代码</td><td><code>Wait(flag)</code> + <code>cacheReadInvalidate</code></td><td><b>完全相同，零改动</b></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="s3">3. 为什么方案 A 在 A3 不行</h2>
+
+  <h3>3.1 方案 A 的完整链路</h3>
+
+  <div class="fig">
+    <svg viewBox="0 0 960 300" role="img" aria-label="方案 A 链路图">
+      <defs>
+        <marker id="ar1" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+        </marker>
+      </defs>
+      <rect x="14" y="96" width="186" height="96" rx="10" fill="#eef3ff" stroke="#b9ccf5"/>
+      <text x="107" y="126" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">Host / tiling</text>
+      <text x="107" y="148" text-anchor="middle" font-size="11.5" fill="#4b5668">SetCommEngine(AIV_ENGINE)</text>
+      <text x="107" y="167" text-anchor="middle" font-size="11.5" fill="#4b5668">HcclChannelAcquire / EngineCtxCreate</text>
+
+      <rect x="256" y="76" width="196" height="136" rx="10" fill="#fff" stroke="#cfd8e6"/>
+      <text x="354" y="104" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">HCCL</text>
+      <text x="354" y="127" text-anchor="middle" font-size="11.5" fill="#4b5668">建立 AIV 引擎上下文</text>
+      <text x="354" y="146" text-anchor="middle" font-size="11.5" fill="#4b5668">把 QP / SQ / mem key</text>
+      <text x="354" y="165" text-anchor="middle" font-size="11.5" fill="#4b5668">写入 op param 的</text>
+      <text x="354" y="184" text-anchor="middle" font-size="11.5" fill="#b42318" font-family="monospace">aiRMAInfo</text>
+
+      <rect x="508" y="96" width="200" height="96" rx="10" fill="#eef3ff" stroke="#b9ccf5"/>
+      <text x="608" y="126" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">AIV Kernel</text>
+      <text x="608" y="148" text-anchor="middle" font-size="11.5" fill="#4b5668">拼 hns_roce_rc_sq_wqe</text>
+      <text x="608" y="167" text-anchor="middle" font-size="11.5" fill="#4b5668">写 tail + 敲 doorbell</text>
+
+      <rect x="764" y="96" width="182" height="96" rx="10" fill="#f2fbf6" stroke="#cdeeda"/>
+      <text x="855" y="126" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">NIC（RoCE）</text>
+      <text x="855" y="148" text-anchor="middle" font-size="11.5" fill="#4b5668">按 WQE 发出</text>
+      <text x="855" y="167" text-anchor="middle" font-size="11.5" fill="#4b5668">RDMA Write 到对端</text>
+
+      <line x1="200" y1="144" x2="252" y2="144" stroke="#1d4ed8" stroke-width="1.8" marker-end="url(#ar1)"/>
+      <line x1="452" y1="144" x2="504" y2="144" stroke="#1d4ed8" stroke-width="1.8" marker-end="url(#ar1)"/>
+      <line x1="708" y1="144" x2="760" y2="144" stroke="#1d4ed8" stroke-width="1.8" marker-end="url(#ar1)"/>
+      <text x="354" y="248" text-anchor="middle" font-size="11.5" fill="#7a8699">关键：aiRMAInfo 由 HCCL 填充，应用层无法自行构造</text>
+      <text x="354" y="270" text-anchor="middle" font-size="11.5" fill="#7a8699">A3(910_93) 上该引擎不存在 → aiRMAInfo = 0</text>
+    </svg>
+    <div class="cap">图 1　方案 A：QP 表由 HCCL 在 AIV 引擎上下文建立后下发，kernel 据此直接提单</div>
+  </div>
+
+  <h3>3.2 仓库里这段代码在哪</h3>
+  <ul>
+    <li><b>tiling 侧已声明要 AIV 引擎</b>：<code>notify_dispatch_normal_layered_tiling.cc</code> 中 <code>Mc2CcTilingConfig(...)</code> + <code>SetCommEngine(mc2tiling::AIV_ENGINE)</code>。</li>
+    <li><b>host 侧负责“把引擎建起来”</b>：<code>cam_moe_layered_comm_context.cpp</code>，链路为 <code>HcclCommMemReg → HcclChannelAcquire(COMM_ENGINE_AIV) → HcclEngineCtxCreate(COMM_ENGINE_AIV)</code>。原本整段被 <code>#if defined(__DAV_C310__)</code> 限制为 A5 专用。</li>
+    <li><b>kernel 侧读取</b>：<code>cam_moe_layered_comm.h</code> 中 <code>rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_-&gt;aiRMAInfo;</code>，随后在 <code>PostRdmaSend</code> 里按 <code>dstRank</code> 定位 SQ、构造 WQE。</li>
+  </ul>
+
+  <h3>3.3 实测结果</h3>
+  <p>把 host 侧 arch 门控去掉，按 A5 完全相同的逻辑在 A3 上执行，第一处 HCCL 调用就被拒绝：</p>
+<pre><span class="c">// cam_moe_layered_comm_context.cpp: GetExistingEngineContext</span>
+ret = HcclEngineCtxGet(comm, contextTag.c_str(), CommEngine::COMM_ENGINE_AIV, &amp;engineContext, &amp;contextBytes);
+if (ret != HCCL_SUCCESS &amp;&amp; ret != HCCL_E_NOT_FOUND) {
+    HostTrace(<span class="s">"fail step=engine-get code=%d"</span>, static_cast&lt;int&gt;(ret));
+    return ret;
+}
+<span class="c">// 输出：fail step=engine-get code=1</span>
+</pre>
+
+  <div class="warnbox">
+    <strong>要点：</strong>正常语义下“上下文尚未创建”应返回 <code>HCCL_E_NOT_FOUND</code>，代码会继续走创建流程；
+    但 A3 返回的是 <code>HCCL_E_PARA(1)</code>，属于“引擎类型不支持”的硬错误。这说明 <b>910_93 的 HCCL 不提供 <code>COMM_ENGINE_AIV</code></b>，
+    自然不会向 op param 写 <code>aiRMAInfo</code>。
+  </div>
+
+  <p>还有一个反证：kernel 里 A3 的 AI-RMA 分支是<b>完整实现</b>的（<code>PostRdmaSend</code> 的 <code>#ifndef __DAV_C310__</code> 分支，注释写作 “A3 AiRMA RDMA write”），说明代码作者原意是 A3 也能用。缺的不是 kernel 逻辑，而是平台侧能力。</p>
+
+  <h2 id="s4">4. 为什么方案 B 可以</h2>
+
+  <h3>4.1 核心：窗口地址本身就是“远端可写地址”</h3>
+  <p>A3 的通信窗口由 HCCL 注册（<code>HcclCommMemReg</code> + rank graph 建链），注册后每个 rank 拿到的 <code>remoteRes[peer].nextDevicePtr-&gt;windowsIn</code> 是<b>统一地址空间里的远端窗口地址</b>：</p>
+  <ul>
+    <li>同一 server 内 → 该地址映射到对端 HBM，硬件走 HCCS；</li>
+    <li>跨 server → 该地址由 HCCL 传输层接管，落到该地址的写会被封装成 RDMA 写发到对端。</li>
+  </ul>
+  <p>因此 kernel 只需要“往这个地址写数据”，<b>不需要知道 QP、SQ、mem key</b>——拼包这件事由 HCCL 内部完成。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 960 320" role="img" aria-label="方案 B 链路图">
+      <defs>
+        <marker id="ar2" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#0e7490"/>
+        </marker>
+      </defs>
+      <rect x="14" y="60" width="230" height="112" rx="10" fill="#ecfdf9" stroke="#b7e6dd"/>
+      <text x="129" y="88" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">AIV Kernel</text>
+      <text x="129" y="110" text-anchor="middle" font-size="11.5" fill="#4b5668">DataCopyPad(payload)</text>
+      <text x="129" y="129" text-anchor="middle" font-size="11.5" fill="#4b5668">DataCopyPad(flag)</text>
+      <text x="129" y="150" text-anchor="middle" font-size="11.5" fill="#4b5668">目标：WindowIn(peer)+off</text>
+
+      <rect x="292" y="46" width="272" height="140" rx="10" fill="#fff" stroke="#cfd8e6"/>
+      <text x="428" y="74" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">HCCL 窗口 / 传输层</text>
+      <text x="428" y="97" text-anchor="middle" font-size="11.5" fill="#4b5668">HcclCommMemReg 注册窗口</text>
+      <text x="428" y="116" text-anchor="middle" font-size="11.5" fill="#4b5668">rank graph 建立地址映射</text>
+      <text x="428" y="135" text-anchor="middle" font-size="11.5" fill="#4b5668">内部持有 QP，自行拼包</text>
+      <text x="428" y="158" text-anchor="middle" font-size="11.5" fill="#0e7490" font-family="monospace">peer VA → 物理路径</text>
+
+      <rect x="612" y="46" width="150" height="62" rx="10" fill="#f2fbf6" stroke="#cdeeda"/>
+      <text x="687" y="72" text-anchor="middle" font-size="12.5" fill="#1b2230" font-weight="600">同 server</text>
+      <text x="687" y="92" text-anchor="middle" font-size="11.5" fill="#4b5668">HCCS 直连 HBM</text>
+
+      <rect x="612" y="124" width="150" height="62" rx="10" fill="#f2fbf6" stroke="#cdeeda"/>
+      <text x="687" y="150" text-anchor="middle" font-size="12.5" fill="#1b2230" font-weight="600">跨 server</text>
+      <text x="687" y="170" text-anchor="middle" font-size="11.5" fill="#4b5668">RoCE 网卡</text>
+
+      <rect x="806" y="46" width="140" height="140" rx="10" fill="#eef3ff" stroke="#b9ccf5"/>
+      <text x="876" y="74" text-anchor="middle" font-size="13" fill="#1b2230" font-weight="600">对端窗口</text>
+      <text x="876" y="98" text-anchor="middle" font-size="11.5" fill="#4b5668">payload 落地</text>
+      <text x="876" y="118" text-anchor="middle" font-size="11.5" fill="#4b5668">flag 置位</text>
+      <text x="876" y="142" text-anchor="middle" font-size="11.5" fill="#4b5668">对端 Wait 轮询</text>
+      <text x="876" y="162" text-anchor="middle" font-size="11.5" fill="#4b5668">cacheReadInvalidate</text>
+
+      <line x1="244" y1="116" x2="288" y2="116" stroke="#0e7490" stroke-width="1.8" marker-end="url(#ar2)"/>
+      <line x1="564" y1="78" x2="608" y2="78" stroke="#0e7490" stroke-width="1.8" marker-end="url(#ar2)"/>
+      <line x1="564" y1="156" x2="608" y2="156" stroke="#0e7490" stroke-width="1.8" marker-end="url(#ar2)"/>
+      <line x1="762" y1="78" x2="802" y2="98" stroke="#0e7490" stroke-width="1.8" marker-end="url(#ar2)"/>
+      <line x1="762" y1="156" x2="802" y2="136" stroke="#0e7490" stroke-width="1.8" marker-end="url(#ar2)"/>
+      <text x="470" y="248" text-anchor="middle" font-size="11.5" fill="#7a8699">kernel 只写地址，不拼包：QP 由 HCCL 内部持有，应用层无需 aiRMAInfo</text>
+      <text x="470" y="270" text-anchor="middle" font-size="11.5" fill="#7a8699">接收侧语义不变：仍轮询自身窗口的 flag，未见 flag 不读载荷</text>
+    </svg>
+    <div class="cap">图 2　方案 B：kernel 直接写远端窗口地址，由 HCCL 传输层按拓扑选择 HCCS 或 RoCE</div>
+  </div>
+
+  <h3>4.2 为什么语义等价</h3>
+  <p>方案 A 的两次 WQE 做的事情是：<b>把 src 的数据放进远端 dst 这块内存</b>，然后<b>再写一个 flag</b>。方案 B 做的是完全相同的一件事，只是把“网卡异步搬”换成“核自己搬”。接收侧代码完全不知道区别：</p>
+<pre><span class="c">// 接收侧（未改动）</span>
+Wait((__gm__ uint64_t *)(in + flag), ComposeFlag(epoch, Phase::CONTROL_COUNT_READY));
+cacheReadInvalidate(in + ControlLaneOffset(...), layout_.controlStride);
+</pre>
+  <p>正确性依赖两点，方案 B 都满足：</p>
+  <ol>
+    <li><b>顺序</b>：先 payload、后 flag（代码里两段之间还有 <code>TracePoint(704)</code>，便于确认）；</li>
+    <li><b>可见性</b>：写 flag 前有 <code>MTE3_S</code> 同步，对端读数据前有 <code>cacheReadInvalidate</code>。</li>
+  </ol>
+
+  <h3>4.3 仓库内的既有佐证</h3>
+  <p>A3 的非分层路径（<code>moe_distribute_dispatch_v2</code>、<code>moe_distribute_combine_v2</code>、<code>cam_moe_combine_normal_multi_round</code>）在 32 卡跨 2 台的 ep 域上，全部使用 <code>GetBaseWindAddrByRankId</code> + <code>DataCopyPad</code> 写远端窗口 + flag 的方式，从未使用 <code>aiRMAInfo</code>。方案 B 只是把 layered notify 也拉回同一套机制。</p>
+
+  <h2 id="s5">5. A5 支持、A3 不支持的原因</h2>
+
+  <table>
+    <thead>
+      <tr><th style="width:20%">维度</th><th>A5（C310 / 950）</th><th>A3（910_93）</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>宏</td><td><code>__DAV_C310__</code> 已定义</td><td>未定义，走 <code>SocVersion::ASCEND910_93</code></td></tr>
+      <tr><td>数据面机制</td><td>hcomm 通道 + AIV 引擎上下文（CANN 9.2+）</td><td>HCCL 窗口（HCCS / RoCE 由传输层调度）</td></tr>
+      <tr><td>kernel 提单能力</td><td>可以：AIV 直接操作 HW channel，发 WR</td><td>不可以：无 AI-RMA 能力，SQ 未暴露给 AIV</td></tr>
+      <tr><td><code>COMM_ENGINE_AIV</code></td><td>支持，<code>HcclEngineCtxCreate</code> 成功</td><td>不支持，<code>HcclEngineCtxGet</code> 返回 <code>HCCL_E_PARA</code></td></tr>
+      <tr><td><code>aiRMAInfo</code></td><td>由 HCCL 填充</td><td>恒为 0</td></tr>
+    </tbody>
+  </table>
+
+  <p>这是<b>平台能力差异</b>，不是配置差异：A5 的软硬栈把“AIV 直接驱动网卡队列”的能力开放给了 kernel；A3 的 RoCE 仍由 HCCL 自己驱动，应用层拿不到 SQ 描述，也无法自行创建 QP（没有 verbs 接口）。</p>
+
+  <div class="note">
+    <b>表述建议：</b>对外说明时不要写“QP 专属 A5”。准确说法是——<b>在 A3(910_93) 与当前 CANN 版本上，HCCL 不提供 <code>COMM_ENGINE_AIV</code>（返回 <code>HCCL_E_PARA</code>），因此不会下发 <code>aiRMAInfo</code></b>。若后续 CANN 在 A3 上支持该引擎，改回两处开关即可复用方案 A。
+  </div>
+
+  <h2 id="s6">6. 关键问答：DataCopy 走的是 RoCE 而不是 HCCS，为什么能用</h2>
+
+  <div class="qa">
+    <p class="q">Q：跨节点没有 HCCS 直连，<code>DataCopy</code> 是一条本地拷贝指令，凭什么能写到另一台机器？</p>
+    <p><b>A：因为它写的不是普通 HBM 地址，而是 HCCL 窗口地址。</b></p>
+  </div>
+
+  <p>拆成三层看：</p>
+
+  <h3>6.1 地址层：这个 VA 是 HCCL 分配的</h3>
+  <p><code>WindowIn(peer)</code> 来自 <code>remoteRes[peer].nextDevicePtr-&gt;windowsIn</code>。这个值在 <code>HcclCommMemReg</code> 注册窗口、<code>rank graph</code> 建立链路时由 HCCL 分配，是<b>统一编址空间</b>里的地址，不是对端 HBM 的物理地址。AIV 写它时，硬件看到的是一条“窗口地址写”，由地址解码交给传输层。</p>
+
+  <h3>6.2 传输层：谁把数据送过网</h3>
+  <p>跨节点的窗口写，最终仍然由 <b>RoCE 网卡</b>发出，但“拼 RoCE 包”的主体是 <b>HCCL 的传输层</b>（它内部持有这些 QP），<b>不是 AIV 核</b>。这与方案 A 的差别只在于：</p>
+  <table>
+    <thead><tr><th style="width:26%"></th><th>方案 A</th><th>方案 B</th></tr></thead>
+    <tbody>
+      <tr><td>谁拼 WQE / 网络包</td><td>kernel</td><td>HCCL 传输层</td></tr>
+      <tr><td>kernel 需要什么</td><td>QP 号、SQ 地址、mem key（<code>aiRMAInfo</code>）</td><td>只需要目标窗口地址</td></tr>
+      <tr><td>物理介质</td><td>RoCE</td><td>RoCE（跨节点）/ HCCS（同节点）</td></tr>
+    </tbody>
+  </table>
+  <p>换句话说：<b>两条路都过 RoCE，区别是“谁提单”</b>。方案 A 把提单权交给了 kernel（因此需要 QP 表），方案 B 把提单权留给 HCCL（因此不需要 QP 表）。</p>
+
+  <h3>6.3 语义层：为什么“写内存”等价于“发消息”</h3>
+  <ul>
+    <li>窗口注册时，双方约定了窗口大小与地址映射，任何一方写 <code>peer.windowsIn + off</code> 都等同于写对端 HBM 的对应位置；</li>
+    <li>flag 也是同一块窗口里的一个槽位，所以“写数据 + 写 flag”天然有序且可被对端轮询到；</li>
+    <li>对端<code>Wait</code> 轮询的是自己的窗口（本地地址），看到 flag 后 <code>cacheReadInvalidate</code> 再读 payload，读到的一定是最新值。</li>
+  </ul>
+
+  <div class="okbox">
+    <b>一句话总结：</b>方案 B 并没有“绕开网络”，它把“发包”的职责从 kernel 交回给 HCCL。因此不需要 <code>aiRMAInfo</code>，也没有“没有 QP 就无法通信”的问题。
+  </div>
+
+  <h3>6.4 与同节点窗口直写的区别</h3>
+  <p>你会注意到日志里同节点 peer 的 <code>windowsIn</code> 打出来是 0（例如 <code>ctx same r=0 ptr=c1faf000 win=0</code>），这是该 relation 结构的字段在该部署下未填充，不代表同节点不可写——同节点的数据面在本仓库走的是另一条既定路径（写本 rank 窗口后由 owner 处理）。跨节点方向观测到的 <code>win=0x80000000</code> 才是本次发送实际使用的地址。</p>
+
+  <h2 id="s7">7. 方案 B 的具体实现</h2>
+
+  <h3>7.1 改动清单（提交 6f10fc4，分支 a5_layered）</h3>
+  <table>
+    <thead><tr><th style="width:34%">文件</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr><td><code>deep_ep.cpp</code></td><td>AIV 引擎上下文只在 A5(ASCEND950) 创建；A3 不再尝试，避免 Buffer 构造期抛异常，<code>roceContext</code> 回到 dummy 张量（A3 kernel 不使用它）。</td></tr>
+      <tr><td><code>cam_moe_layered_comm.h</code></td><td>新增 <code>DirectWindowWrite()</code>：A3 返回 <code>true</code>，A5 返回 <code>false</code>，作为选择分支的单一开关。</td></tr>
+      <tr><td><code>notify_dispatch_normal_layered.cpp</code></td><td>stage 6 的 count payload / flag、stage 12 的 base ack payload / flag 共 4 处，在 A3 上改走已有的 <code>CopyWindowBytes</code> / <code>CopyWindowFlag</code>。</td></tr>
+      <tr><td>A5 全路径</td><td><b>零改动</b>，仍走 hcomm 通道 + <code>PostRdmaSend</code>。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.2 发送分支的写法</h3>
+<pre><span class="c">// stage 6：发布 count 控制信息</span>
+if (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
+    <span class="c">// A3：直接写到对端窗口（或本地窗口）</span>
+    CopyWindowBytes(payload, dst, layout_.controlStride);
+} else {
+    <span class="c">// A5：AI-RMA 提交 WQE</span>
+    comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
+}
+CopyWindowFlag(dst, layout_.countFlagOffset, ComposeFlag(epoch, Phase::CONTROL_COUNT_READY));
+</pre>
+
+  <h3>7.3 搬运实现</h3>
+<pre><span class="c">// CopyWindowBytes：分块 GM → UB → 远端窗口 GM</span>
+for (uint64_t offset = 0U; offset &lt; bytes; offset += kAggregateCopyTileBytes) {
+    const uint64_t left = bytes - offset;
+    const uint64_t tile = left &lt; kAggregateCopyTileBytes ? left : kAggregateCopyTileBytes;
+    DataCopyPad(ub, src + offset, ...);        <span class="c">// MTE2：本地 GM → UB</span>
+    SyncFunc&lt;MTE2_V&gt;();
+    DataCopyPad(dst + offset, ub, ...);        <span class="c">// MTE3：UB → 远端窗口</span>
+    SyncFunc&lt;MTE3_S&gt;();
+}
+</pre>
+<pre><span class="c">// CopyWindowFlag：8 字节 flag 写到远端窗口的 flag 槽</span>
+DataCopyPad(flagUb, value, ...);
+SyncFunc&lt;MTE2_V&gt;();
+DataCopyPad(dst + flagOffset, flagUb, ...);
+SyncFunc&lt;MTE3_S&gt;();
+</pre>
+
+  <h3>7.4 为什么这套实现能保证正确</h3>
+  <ul>
+    <li><b>地址有效</b>：<code>dst</code> 来自 <code>WindowIn(proxyRank)</code>，与方案 A 用的是同一个地址，只是写入方式不同；</li>
+    <li><b>顺序有效</b>：payload 的每个 tile 都以 <code>MTE3_S</code> 收尾，之后才写 flag，因此对端看到 flag 时载荷必然已落地；</li>
+    <li><b>接收不变</b>：对端仍是 <code>Wait(flag)</code> + <code>cacheReadInvalidate</code>，不区分数据是网卡搬来的还是核搬来的；</li>
+    <li><b>可回退</b>：只需 <code>DirectWindowWrite()</code> 返回 false 并恢复 host 侧门控，即可在支持 AIV 引擎的平台上切回方案 A。</li>
+  </ul>
+
+  <h2 id="s8">8. 算法与拓扑不变：本地聚合仍然保留</h2>
+
+  <p>方案 B <b>只替换搬运指令</b>。notify 的 14 个阶段、通信拓扑、聚合语义全部不变：</p>
+
+  <table>
+    <thead><tr><th style="width:26%">阶段</th><th>做什么</th><th style="width:22%">方案 B 是否改变</th></tr></thead>
+    <tbody>
+      <tr><td>Cleanup / InitPlanHeader</td><td>清理窗口、写计划头</td><td>否</td></tr>
+      <tr><td>BuildLocalRoutePlanParallel</td><td>按 token 路由构建本地计划</td><td>否</td></tr>
+      <tr><td>ReduceLocalCounts</td><td>本地计数归并</td><td>否</td></tr>
+      <tr><td>PlanOutboundPayloads</td><td>计算跨节点出向载荷</td><td>否</td></tr>
+      <tr><td>PublishCountControls（stage 6）</td><td>把“发往目标 server 的包数 + 各专家人数”写到 <code>proxyRank = target*rps + rankInServer</code>（目标 server 的同号卡）</td><td><b>仅搬运方式</b></td></tr>
+      <tr><td>AggregateServerCounts（stage 7）</td><td>等各 sourceServer 的 flag 到齐 → <b>在本节点聚合</b>成 owner 卡所需表 → 写回本 server 各卡窗口</td><td>否（聚合逻辑原样保留）</td></tr>
+      <tr><td>ApplyProxyAggregatesToOwner / FanoutBaseAckSlicesToProxies / WaitAllBaseAckSlices</td><td>应用聚合结果、扇出 ack 分片、等待回齐</td><td>否</td></tr>
+      <tr><td>AssembleBaseAcksAtProxies / PublishBaseAcksFromProxies（stage 12）</td><td>组装并回传 base ack</td><td><b>仅搬运方式</b></td></tr>
+      <tr><td>ApplyAllReturnedRowBases</td><td>应用回传的 row base</td><td>否</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>要点：</b>“聚合”是 stage 7 的语义，与传输方式解耦。方案 B 不需要删除任何聚合步骤——所谓“本节点聚合后发对端”的模式仍然成立，只是“发”的动作改成了写窗口。
+  </div>
+
+  <h2 id="s9">9. 代价、风险与验证方法</h2>
+
+  <h3>9.1 代价</h3>
+  <table>
+    <thead><tr><th style="width:24%">项</th><th>说明</th><th style="width:22%">影响</th></tr></thead>
+    <tbody>
+      <tr><td>同步性</td><td>发送期间占用本核 MTE3，不是异步提交</td><td>控制面（百字节级）几乎无感</td></tr>
+      <tr><td>分块拷贝</td><td>大 payload 需按 tile 循环</td><td>dispatch/combine 若走同方案，可能需要调大 tile 或多核并行</td></tr>
+      <tr><td>多一层中转</td><td>kernel 不直接驱动网卡</td><td>极限延迟略高于 AI-RMA</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.2 风险与判读</h3>
+  <table>
+    <thead><tr><th style="width:32%">现象</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td>stage 6 全打出，stage 7 卡在 <code>Wait</code></td><td>某方向的窗口写未生效（<code>windowsIn</code> 映射异常），需打印该 peer 的窗口地址核对</td></tr>
+      <tr><td>出现 <code>dst=5280</code> 这类窗口基址为 0 的地址</td><td><code>remoteRes[peer]</code> 未建立，属窗口资源问题，与方案 B 无关</td></tr>
+      <tr><td>仍有 <code>step=...</code> 报错</td><td>跑的不是 6f10fc4 之后的包，确认 <code>git log -1</code> 与 <code>.so</code> 时间戳</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.3 验证方法</h3>
+<pre><span class="c"># 两台机器</span>
+git pull &amp;&amp; bash scripts/rebuild_deepep.sh -c
+RANK=1 ./scripts/run_a3_layered.sh     <span class="c"># 从节点先起</span>
+RANK=0 ./scripts/run_a3_layered.sh     <span class="c"># 主节点</span>
+
+<span class="c"># 关键观察点</span>
+grep -E "\[ln\] (tp|ctl|ctx)" $(ls -t logs/a3-*.log | head -1) | tail -40
+</pre>
+  <p>预期：跨节点核也能打完 <code>701 → 703 → 704 → 702 → stage 7</code>，随后推进到 <code>801/802/803</code> 与 stage 8 以后。</p>
+
+  <h3>9.4 未来若 A3 支持 AIV 引擎</h3>
+  <p>只需两处开关即可切回方案 A，无需新增 A3 专用逻辑：</p>
+  <ul>
+    <li><code>deep_ep.cpp</code>：<code>layeredEngineSoc</code> 加回 <code>ASCEND910_93</code>；</li>
+    <li><code>cam_moe_layered_comm.h</code>：<code>DirectWindowWrite()</code> 返回 <code>false</code>。</li>
+  </ul>
+
+  <h2 id="s10">10. 附录：提交与文件索引</h2>
+
+  <table>
+    <thead><tr><th style="width:18%">提交</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>b18c157</code></td><td>host 侧为 A3 启用 AIV 引擎上下文（验证用，后撤回）</td></tr>
+      <tr><td><code>7a10cd9</code></td><td>新增 <code>[ln-host]</code> 里程碑日志，定位 Create 卡点</td></tr>
+      <tr><td><code>085ae64</code></td><td>HostTrace 双写文件，覆盖空句柄等无打印分支</td></tr>
+      <tr><td><code>0cd0860</code></td><td>把失败步骤写进异常消息（<code>step=...</code>）</td></tr>
+      <tr><td><code>7766878</code></td><td>运行脚本终端白名单放行 <code>[ln-host]</code></td></tr>
+      <tr><td><code>6f10fc4</code></td><td><b>方案 B：A3 分层数据面改用窗口直写，不再依赖 AI-RMA QP 表</b></td></tr>
+    </tbody>
+  </table>
+
+  <table>
+    <thead><tr><th style="width:44%">文件</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td><code>csrc/deepep/deep_ep.cpp</code></td><td>Buffer 构造；A5 建 AIV 引擎上下文；生成 <code>layered_context</code></td></tr>
+      <tr><td><code>csrc/deepep/cam_moe_layered_comm_context.cpp</code></td><td>host 侧窗口注册、通道申请、引擎上下文创建（A5）</td></tr>
+      <tr><td><code>csrc/deepep/ops/op_kernel/cam_moe_layered_comm.h</code></td><td>kernel 通信适配：<code>WindowIn</code> / <code>PostRdmaSend</code> / <code>DirectWindowWrite</code></td></tr>
+      <tr><td><code>csrc/deepep/ops/op_kernel/notify_dispatch_normal_layered.cpp</code></td><td>14 阶段实现与打点；stage 6 / 12 的发送分支</td></tr>
+      <tr><td><code>csrc/deepep/ops/op_kernel/moe_distribute_base.h</code></td><td><code>HcclOpResParam</code>、<code>HcclRankRelationResV2</code>、<code>GetBaseWindAddrByRankId</code></td></tr>
+      <tr><td><code>scripts/run_a3_layered.sh</code></td><td>两机运行脚本，输出落 <code>logs/a3-*.log</code></td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    DeepEP · A3 layered dispatch 方案说明 · 适用于分支 <code>a5_layered</code>（提交 <code>6f10fc4</code> 及以后）。
+  </footer>
+
+</div>
+</body>
+</html>
