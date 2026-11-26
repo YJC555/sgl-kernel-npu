@@ -83,6 +83,26 @@ public:
         return (GM_ADDR)relation->windowsOut;
 #endif
     }
+    __aicore__ inline uint64_t WinSizeBytes() const
+    {
+        return GetWinSize(context_);
+    }
+    // Debug helper: snapshot of a peer relation resource with a null guard, so a
+    // missing remote entry reports 0 instead of faulting on the dereference.
+    __aicore__ inline void LoadPeerWindow(uint32_t rank, uint64_t &nextDevPtr, uint64_t &windowIn) const
+    {
+#ifndef __DAV_C310__
+        nextDevPtr = reinterpret_cast<uint64_t>(context_->remoteRes[rank].nextDevicePtr);
+        windowIn = 0U;
+        if (nextDevPtr != 0U) {
+            windowIn = ((__gm__ HcclRankRelationResV2 *)nextDevPtr)->windowsIn;
+        }
+#else
+        (void)rank;
+        nextDevPtr = 0U;
+        windowIn = 0U;
+#endif
+    }
 #ifdef __DAV_C310__
     __aicore__ inline AscendC::ChannelHandle GetChannel(uint32_t dstRank) const
     {

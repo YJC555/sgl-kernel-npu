@@ -174,6 +174,29 @@ public:
             LAYERED_LOG("[ln] init off cnt=%u mcnt=%u slot=%u exp=%u leoff=%u lecnt=%u\n", info_.packetCountOffset,
                         info_.dispatchMemberCountOffset, info_.packetSlotOffset, info_.expertCountOffset,
                         info_.localExpertOffset, info_.localExpertCountOffset);
+            // Peer window snapshot: a zero windowsIn for a cross-node rank is
+            // exactly what turns WindowIn() into the null destination that
+            // stage 6 currently writes to.
+            const uint32_t rps = info_.ranksPerServer;
+            uint32_t sameRank = info_.epRankId;
+            uint32_t peerRank = info_.epRankId;
+            uint64_t samePtr = 0U;
+            uint64_t sameWin = 0U;
+            uint64_t peerPtr = 0U;
+            uint64_t peerWin = 0U;
+            if (rps != 0U && info_.serverNum != 0U) {
+                sameRank = (info_.epRankId / rps) * rps + (info_.epRankId + 1U) % rps;
+                peerRank = ((info_.epRankId / rps + 1U) % info_.serverNum) * rps + info_.rankInServer;
+            }
+            comm_.LoadPeerWindow(sameRank, samePtr, sameWin);
+            comm_.LoadPeerWindow(peerRank, peerPtr, peerWin);
+            LAYERED_LOG("[ln] ctx sz=%u winMB=%u localIn=%x\n", comm_.RankSize(),
+                        static_cast<uint32_t>(comm_.WinSizeBytes() >> 20U),
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(comm_.WindowIn(info_.epRankId))));
+            LAYERED_LOG("[ln] ctx same r=%u ptr=%x win=%x\n", sameRank, static_cast<uint32_t>(samePtr),
+                        static_cast<uint32_t>(sameWin));
+            LAYERED_LOG("[ln] ctx peer r=%u ptr=%x win=%x\n", peerRank, static_cast<uint32_t>(peerPtr),
+                        static_cast<uint32_t>(peerWin));
         }
 #endif
     }
