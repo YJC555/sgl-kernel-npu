@@ -784,6 +784,17 @@ private:
             // Split the payload and flag submissions so a stall in either WQE
             // names itself instead of both collapsing into a missing 702.
             TracePoint(703U, proxyRank);
+#if DEEPEP_LAYERED_DEBUG_LOG
+            if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
+                // Pointer-only view: no dereference, so it survives even when the
+                // QP descriptor is bad, and it shows which branch is taken.
+                LAYERED_LOG("[ln] ctl self=%u proxy=%u rps=%u inSrv=%u\n", info_.epRankId, proxyRank,
+                            info_.ranksPerServer, info_.rankInServer);
+                LAYERED_LOG("[ln] ctl dst=%x src=%x bytes=%u\n",
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst)),
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(payload)), layout_.controlStride);
+            }
+#endif
             if (proxyRank == info_.epRankId) {
                 CopyWindowBytes(payload, dst, layout_.controlStride);
             } else {
@@ -793,11 +804,7 @@ private:
                     uint32_t qpTail = 0U;
                     uint32_t qpDepth = 0U;
                     comm_.LoadQpState(proxyRank, qpHead, qpTail, qpDepth);
-                    // Two short lines: a single call has a limited argument count.
                     LAYERED_LOG("[ln] sq dst=%u head=%u tail=%u depth=%u\n", proxyRank, qpHead, qpTail, qpDepth);
-                    LAYERED_LOG("[ln] sq dstAddr=%x src=%x bytes=%u\n",
-                                static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst)),
-                                static_cast<uint32_t>(reinterpret_cast<uint64_t>(payload)), layout_.controlStride);
                 }
 #endif
                 comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
