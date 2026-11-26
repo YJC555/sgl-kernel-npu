@@ -179,6 +179,31 @@ public:
         return PostRdmaSend(localFlag, remoteFlag, dstRank, sizeof(uint64_t), doorbellUb, headUb, timeoutCycles);
     }
 
+    // Debug helper: snapshot of the AiRMA SQ flow-control words for dstRank.
+    // head is the producer index this kernel maintains; tail is advanced by the
+    // transport when WQEs complete. A frozen tail is what turns the queue-space
+    // spin inside PostRdmaSend into a hang.
+    __aicore__ inline void LoadQpState(uint32_t dstRank, uint32_t &head, uint32_t &tail, uint32_t &depth) const
+    {
+#ifndef __DAV_C310__
+        const uint32_t qpNum = rdmaInfo_->qpNum;
+        auto *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_->sqPtr +
+                                          static_cast<uint64_t>(dstRank) * qpNum * rdmaInfo_->sizeOfAiRMAWQ);
+        auto *headAddr = (__gm__ uint32_t *)qp->headAddr;
+        auto *tailAddr = (__gm__ uint32_t *)qp->tailAddr;
+        cacheWriteThrough((__gm__ uint8_t *)headAddr, sizeof(uint64_t));
+        cacheWriteThrough((__gm__ uint8_t *)tailAddr, sizeof(uint64_t));
+        head = *headAddr;
+        tail = *tailAddr;
+        depth = qp->depth;
+#else
+        (void)dstRank;
+        head = 0U;
+        tail = 0U;
+        depth = 0U;
+#endif
+    }
+
     __aicore__ inline bool Drain(uint32_t dstRank, uint64_t timeoutCycles) const
     {
         if (dstRank == rankId_) return true;

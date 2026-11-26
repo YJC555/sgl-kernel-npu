@@ -787,6 +787,19 @@ private:
             if (proxyRank == info_.epRankId) {
                 CopyWindowBytes(payload, dst, layout_.controlStride);
             } else {
+#if DEEPEP_LAYERED_DEBUG_LOG
+                if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
+                    uint32_t qpHead = 0U;
+                    uint32_t qpTail = 0U;
+                    uint32_t qpDepth = 0U;
+                    comm_.LoadQpState(proxyRank, qpHead, qpTail, qpDepth);
+                    // Two short lines: a single call has a limited argument count.
+                    LAYERED_LOG("[ln] sq dst=%u head=%u tail=%u depth=%u\n", proxyRank, qpHead, qpTail, qpDepth);
+                    LAYERED_LOG("[ln] sq dstAddr=%x src=%x bytes=%u\n",
+                                static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst)),
+                                static_cast<uint32_t>(reinterpret_cast<uint64_t>(payload)), layout_.controlStride);
+                }
+#endif
                 comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
             }
             TracePoint(704U, target);
