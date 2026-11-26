@@ -1,6 +1,6 @@
 #include "cam_moe_layered_comm_context.hpp"
 
-#if defined(__DAV_C310__) && DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
+#if DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
 #include "hccl/hccl_rank_graph.h"
 #include "hccl/hccl_res.h"
 
@@ -236,12 +236,28 @@ HcclResult BuildHostContext(HcclComm comm, const std::string &memTag, const Comm
             continue;
         }
         const bool intraServer = peer / ranksPerServer == rankInfo.rank / ranksPerServer;
-        const CommProtocol peerProtocol = intraServer ? CommProtocol::COMM_PROTOCOL_UB_MEM : selectedProtocol;
+        CommProtocol peerProtocol = intraServer ? CommProtocol::COMM_PROTOCOL_UB_MEM : selectedProtocol;
         CommLink link{};
         HcclResult ret = FindProtocolLink(comm, rankInfo.rank, peer, peerProtocol, link);
+        if (ret != HCCL_SUCCESS && intraServer) {
+            // A3 servers expose no UB_MEM link: use the configured transport for
+            // the intra-server peers as well.
+            peerProtocol = selectedProtocol;
+            ret = FindProtocolLink(comm, rankInfo.rank, peer, peerProtocol, link);
+        }
+#ifdef __DAV_C310__
         if (ret != HCCL_SUCCESS) {
             return ret;
         }
+#else
+        // A3 never reads the hcomm channels: its kernel drives the AI-RMA queues
+        // taken from the MC2 op param. A peer without a matching link (for
+        // example an intra-server HCCS peer) must therefore not abort the engine
+        // context creation, which is the only reason A3 runs it.
+        if (ret != HCCL_SUCCESS) {
+            continue;
+        }
+#endif
         HcclChannelDesc desc{};
         ret = HcclChannelDescInit(&desc, 1U);
         if (ret != HCCL_SUCCESS) {
@@ -269,6 +285,7 @@ HcclResult BuildHostContext(HcclComm comm, const std::string &memTag, const Comm
         const uint32_t peer = peers[i];
         const uint32_t compact = peer < rankInfo.rank ? peer : peer - 1U;
         host.hcommHandle[compact] = static_cast<uint64_t>(channels[i]);
+#ifdef __DAV_C310__
         uint32_t remoteCount = 0U;
         CommMem *remoteMems = nullptr;
         char **remoteTags = nullptr;
@@ -288,6 +305,7 @@ HcclResult BuildHostContext(HcclComm comm, const std::string &memTag, const Comm
         if (!found) {
             return HCCL_E_NOT_FOUND;
         }
+#endif
     }
     return HCCL_SUCCESS;
 }

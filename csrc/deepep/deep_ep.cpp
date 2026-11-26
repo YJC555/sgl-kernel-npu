@@ -41,9 +41,7 @@ constexpr uint32_t MAX_ROUNDS = 256;
 constexpr uint32_t MIN_TOKENS_PER_ROUND = 32;
 constexpr uint32_t MAX_TOKENS_PER_ROUND = 8192;
 constexpr uint32_t MAX_TOTAL_TOKENS = 131072;
-#ifdef __DAV_C310__
 extern "C" HcclResult HcomGetCommHandleByGroup(const char *groupName, HcclComm *comm) __attribute__((weak));
-#endif
 
 #if DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
 CamMoeLayeredProtocol GetLayeredProtocol(op::SocVersion socVersion)
@@ -124,16 +122,20 @@ Buffer::Buffer(int64_t rank, int64_t num_ranks, int64_t num_nvl_bytes, int64_t n
         EP_HOST_ASSERT(moe_all_to_all_group_name.size() < HCOMM_NAME_LEN);
     }
 
-#if defined(__DAV_C310__) && DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
-    if (layered_mode && soc_version == op::SocVersion::ASCEND950) {
+#if DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
+    // The layered data plane needs an AIV engine context on the communication
+    // domain that the ops are bound to. Creating it is what makes HCCL publish
+    // the AI-RMA QP table (aiRMAInfo) that the A3 kernels consume.
+    const bool layeredEngineSoc = soc_version == op::SocVersion::ASCEND950 || soc_version == op::SocVersion::ASCEND910_93;
+    if (layered_mode && layeredEngineSoc) {
         HcclComm layeredComm = ep_comm;
         char contextGroup[HCOMM_NAME_LEN] = {};
-        if (!moe_all_to_all_group_name.empty()) {
-            EP_HOST_ASSERT_S(HcomGetCommHandleByGroup != nullptr, "normal layered A5",
-                             " HCCL group lookup is unavailable");
+        if (!moe_all_to_all_group_name.empty() && HcomGetCommHandleByGroup != nullptr) {
             HCCL_CHECK(HcomGetCommHandleByGroup(moe_all_to_all_group_name.c_str(), &layeredComm));
             std::memcpy(contextGroup, moe_all_to_all_group_name.data(), moe_all_to_all_group_name.size() + 1U);
         } else {
+            EP_HOST_ASSERT_S(moe_all_to_all_group_name.empty(), "normal layered",
+                             " HCCL group lookup is unavailable, cannot bind the layered engine context");
             HCCL_CHECK(HcclGetCommName(layeredComm, contextGroup));
         }
         layered_context_manager = std::make_unique<LayeredCommContextManager>();
