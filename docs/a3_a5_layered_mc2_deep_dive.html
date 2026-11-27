@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A3/A5 分层通信与 MC2 通信下发机制详解</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#1b1f26; --ink-2:#4a5462; --ink-3:#7b8698;
+    --line:#e3e7ee; --brand:#1f6feb; --brand-soft:#eaf1ff; --green:#1a7f4b; --green-soft:#e8f6ee;
+    --amber:#9a6b00; --amber-soft:#fff6e0; --red:#b42318; --red-soft:#fdeceb;
+    --code-bg:#1e2229; --code-ink:#e6e9ef;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;line-height:1.78;font-size:15.5px}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 24px 80px}
+  header.hero{background:linear-gradient(135deg,#12233f 0%,#1f4f8f 55%,#2a7ac4 100%);color:#fff;border-radius:18px;padding:40px 40px 34px;margin-bottom:28px}
+  header.hero h1{margin:0 0 10px;font-size:30px;letter-spacing:.5px}
+  header.hero p{margin:6px 0;color:#cfe0f7;font-size:14.5px}
+  .tags{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .tag{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);padding:3px 10px;border-radius:999px;font-size:12.5px;color:#eaf2ff}
+  nav.toc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-bottom:26px}
+  nav.toc h2{margin:0 0 10px;font-size:15px;color:var(--ink-3);letter-spacing:1px}
+  nav.toc ol{margin:0;padding-left:20px;columns:2;column-gap:32px}
+  nav.toc li{margin:4px 0;font-size:14px}
+  nav.toc a{color:var(--ink-2);text-decoration:none}
+  nav.toc a:hover{color:var(--brand)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 30px;margin-bottom:22px}
+  h2.sec{margin:0 0 6px;font-size:22px;display:flex;align-items:center;gap:10px}
+  h2.sec span.num{background:var(--brand);color:#fff;width:30px;height:30px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 auto}
+  h3{font-size:17px;margin:26px 0 8px;color:#12233f}
+  h4{font-size:15px;margin:18px 0 6px;color:var(--ink-2)}
+  p{margin:8px 0}
+  ul,ol{margin:8px 0;padding-left:22px}
+  li{margin:5px 0}
+  code.inl{background:#eef2f7;border:1px solid #e0e6ef;border-radius:5px;padding:1px 6px;font-family:"JetBrains Mono",Consolas,monospace;font-size:13px;color:#1c3d6b}
+  pre{background:var(--code-bg);color:var(--code-ink);border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:13.2px;line-height:1.62;font-family:"JetBrains Mono",Consolas,"Courier New",monospace;margin:12px 0}
+  pre .c{color:#8b98ab}
+  pre .k{color:#ff9d76}
+  pre .s{color:#9fe08a}
+  pre .n{color:#7fc3ff}
+  pre .hi{background:rgba(255,214,0,.18);border-radius:3px;padding:0 2px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:#f0f4fa;font-weight:600;color:#23324a}
+  tbody tr:nth-child(even) td{background:#fafbfd}
+  .callout{border-radius:10px;padding:14px 16px;margin:14px 0;font-size:14.5px;border-left:4px solid}
+  .callout b{display:block;margin-bottom:4px}
+  .info{background:var(--brand-soft);border-color:var(--brand);color:#143a6b}
+  .warn{background:var(--amber-soft);border-color:#d99a00;color:#5c4300}
+  .bad{background:var(--red-soft);border-color:var(--red);color:#6d1a12}
+  .good{background:var(--green-soft);border-color:var(--green);color:#0e492c}
+  .flow{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin:16px 0}
+  .flow .box{flex:1 1 150px;background:#f5f8fd;border:1px solid #d6e2f3;border-radius:10px;padding:12px;font-size:13.2px}
+  .flow .box b{display:block;color:#143a6b;margin-bottom:4px;font-size:13.5px}
+  .flow .arrow{align-self:center;color:var(--ink-3);font-size:18px}
+  .file{font-size:12.5px;color:var(--ink-3);margin:2px 0 0;font-family:Consolas,monospace}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:860px){.grid2{grid-template-columns:1fr}nav.toc ol{columns:1}}
+  footer{color:var(--ink-3);font-size:12.5px;text-align:center;padding:10px 0 40px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>A3 / A5 分层通信与 MC2 通信下发机制详解</h1>
+  <p>从「notify 算子在 A3 双机 stage 6 挂死」出发，把两套实现彻底讲清：本仓库的 layered notify，与 ops-transformer 的 arch22 参考实现。</p>
+  <p>重点补齐三块最容易卡住新人的知识：<b>tiling 阶段到底在做什么</b>、<b>AICPU / KFC 是什么</b>、<b>为什么 A5 可以而 A3 必须走 AICPU</b>。每个名词先解释，再落到代码。</p>
+  <div class="tags">
+    <span class="tag">Ascend 910_93 (A3)</span>
+    <span class="tag">Ascend 950 (A5)</span>
+    <span class="tag">HCCL</span>
+    <span class="tag">MC2 融合算子</span>
+    <span class="tag">tiling</span>
+    <span class="tag">AICPU / KFC</span>
+    <span class="tag">AI-RMA / QP</span>
+    <span class="tag">RoCE / HCCS</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <h2>目录</h2>
+  <ol>
+    <li><a href="#s0">名词速查：先把术语说清楚</a></li>
+    <li><a href="#s1">背景：MoE、layered 与 notify 算子</a></li>
+    <li><a href="#s2">tiling 阶段到底在做什么（重点）</a></li>
+    <li><a href="#s3">一次 MC2 算子从 host 到 device 的全链路</a></li>
+    <li><a href="#s4">本仓库 A5 路径：为什么可以</a></li>
+    <li><a href="#s5">本仓库 A3 路径：两次尝试与失败原因</a></li>
+    <li><a href="#s6">参考实现 arch22：A3 上怎么拿到 QP 表</a></li>
+    <li><a href="#s7">两份实现的逐项差异与原因</a></li>
+    <li><a href="#s8">AICPU 到底是什么（重点）</a></li>
+    <li><a href="#s9">QP 表与一次 RDMA 写的全过程</a></li>
+    <li><a href="#s10">五维总结：为什么 A5 可以、A3 必须 AICPU</a></li>
+    <li><a href="#s11">结论、改造清单与验证判据</a></li>
+  </ol>
+</nav>
+
+<!-- ================= 0 ================= -->
+<section id="s0">
+  <h2 class="sec"><span class="num">0</span>名词速查：先把术语说清楚</h2>
+  <p>这一章按「硬件 → 通信 → 框架/编译 → MC2 专有」四组排列。每个词都写三件事：<b>是什么</b>、<b>为什么存在</b>、<b>在我们这份代码里对应什么</b>。后文出现时不再重复解释。</p>
+
+  <h3>0.1 硬件与存储</h3>
+  <table>
+    <thead><tr><th>名词</th><th>解释</th><th>在这份代码里</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>AI Core</b></td>
+        <td>Ascend 芯片上真正做矩阵/向量计算的核。一个芯片里有很多个，按类型分为 <b>AIC</b>（Cube，做矩阵乘）和 <b>AIV</b>（Vector，做向量/标量搬运）。</td>
+        <td>tiling 里的 <code class="inl">aivNum = platform.GetCoreNumAiv()</code>，以及 <code class="inl">SetBlockDim(aivNum)</code>。</td>
+      </tr>
+      <tr>
+        <td><b>AIV</b></td>
+        <td>AI Vector Core，向量核。它除了算向量，还能执行 <code class="inl">DataCopy</code> 这类搬运指令，也能跑我们 kernel 里的标量循环（AscendC 允许在 AIV 上执行标量代码）。</td>
+        <td>notify kernel 就是纯 AIV 算子；<b>发 WQE、敲 doorbell 也都由 AIV 完成</b>。</td>
+      </tr>
+      <tr>
+        <td><b>AICPU</b></td>
+        <td>芯片上的<b>通用标量核</b>（ARM 架构的 CPU 核），不算矩阵，专门跑控制面：协议栈、任务调度、内存注册、状态机。<b>它不是 AI Core，不参与算子主体计算。</b></td>
+        <td>A3 上 HCCL 的通信控制面跑在 AICPU 上；kernel 侧通过 <code class="inl">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code> 与它交互。详见第 8 章。</td>
+      </tr>
+      <tr>
+        <td><b>HBM / GM</b></td>
+        <td>HBM 是芯片外的高带宽显存；在 AscendC 里统一叫 <b>GM</b>（Global Memory）。kernel 的输入输出、通信窗口都在 GM。</td>
+        <td><code class="inl">GM_ADDR</code>、<code class="inl">__gm__</code> 指针、<code class="inl">GlobalTensor</code>。</td>
+      </tr>
+      <tr>
+        <td><b>UB</b></td>
+        <td>Unified Buffer，AIV 旁边的片上高速缓存，容量很小（百 KB 级）。所有 <code class="inl">DataCopy</code> 都要经过 UB 中转，且必须按 32B 对齐。</td>
+        <td>tiling 里检查 <code class="inl">totalUbSize &gt;= REQUIRED_NOTIFY_UB_BYTES</code>；kernel 里 <code class="inl">pipe.InitBuffer(...)</code> 申请 UB。</td>
+      </tr>
+      <tr>
+        <td><b>HCCS</b></td>
+        <td>华为私有的<b>芯片间高速互联</b>，用于同一台机器/超节点内的卡间通信，带宽高、延迟低，可直接访存。</td>
+        <td>机内（同 server）的窗口读写走 HCCS；<code class="inl">WindowIn(rank)</code> 在机内是直连地址。</td>
+      </tr>
+      <tr>
+        <td><b>RoCE</b></td>
+        <td>RDMA over Converged Ethernet，把 RDMA 语义跑在以太网/融合网上。<b>跨机通信走它</b>。需要 QP、rkey、WQE 这些 RDMA 概念。</td>
+        <td>A3 跨机 <code class="inl">PostRdmaSend</code> 发 WQE；A5 用 hcomm 的 roce 对象。</td>
+      </tr>
+      <tr>
+        <td><b>UBoE</b></td>
+        <td>类似 RoCE，但底层跑在华为 UB（Unified Bus）网络上。A5 上可能有 roce / uboe 两种协议可选。</td>
+        <td>A5 的 <code class="inl">CamMoeLayeredCommContext.protocol</code>；kernel 里 <code class="inl">roce_.Init</code> / <code class="inl">uboe_.Init</code> 二选一。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>0.2 通信与网络</h3>
+  <table>
+    <thead><tr><th>名词</th><th>解释</th><th>在这份代码里</th></tr></thead>
+    <tbody>
+      <tr><td><b>HCCL</b></td>
+        <td>Huawei Collective Communication Library，昇腾的集合通信库（对标 NCCL）。提供 AllReduce / AllGather / AlltoAll / BatchWrite 等原语，负责建链、建 QP、注册窗口。</td>
+        <td>所有 MC2 tiling 配置、<code class="inl">HcclAiRMAInfo</code>、<code class="inl">HcclChannel</code> 都来自它。</td></tr>
+      <tr><td><b>rank</b></td>
+        <td>通信域里的一张卡（一个进程）的编号。<code class="inl">epRankId</code> = 本卡编号，<code class="inl">epWorldSize</code> = 总卡数。</td>
+        <td>32 卡双机时 world=32、ranksPerServer=16、rankInServer=rank%16。</td></tr>
+      <tr><td><b>server</b></td>
+        <td>一台机器（一个节点）。<code class="inl">serverNum = world / ranksPerServer</code>。</td>
+        <td>双机场景 serverNum=2。</td></tr>
+      <tr><td><b>集合通信</b></td>
+        <td>所有 rank 一起参与、有固定算法的通信，如 AllReduce、AlltoAll。数据面由 HCCL 内部执行，AIV 一般只负责喂数据。</td>
+        <td>opType=8（AlltoAll）属于这一类。</td></tr>
+      <tr><td><b>单边通信 / RDMA Write</b></td>
+        <td>一方直接把数据写到对端内存，对端不需要参与（不需要收指令）。需要 QP + rkey。</td>
+        <td>opType=18（BatchWrite）属于这一类；<code class="inl">PostRdmaSend</code> 就是手写一个 RDMA Write WQE。</td></tr>
+      <tr><td><b>AlltoAll</b></td>
+        <td>每张卡向所有卡各发一份不同数据。MoE 的 dispatch 本质就是 AlltoAll 的一种稀疏形式。</td>
+        <td>本仓库 notify tiling 目前写的 opType=8。</td></tr>
+      <tr><td><b>BatchWrite</b></td>
+        <td>HCCL 的批量单边写原语。HCCL 会为每个目的 rank 准备发送队列（QP/SQ/WQ）和远端内存描述表，正好是 AIV 自己拼 WQE 所需的素材。</td>
+        <td>参考实现 opType=18，这正是能拿到 QP 表的关键。</td></tr>
+      <tr><td><b>QP</b></td>
+        <td>Queue Pair，RDMA 的队列对，由 SQ（发送队列）+ RQ（接收队列）组成。一张卡到每个目的 rank 至少一个 QP。</td>
+        <td><code class="inl">HcclAiRMAInfo.qpNum</code>、<code class="inl">sqPtr</code>、按 <code class="inl">dstRank*qpNum</code> 寻址。</td></tr>
+      <tr><td><b>WQ / WQE</b></td>
+        <td>Work Queue / Work Queue Entry。WQE 就是“一条发送指令”，里面写清楚：操作类型（写）、长度、远端地址、rkey、本地地址。</td>
+        <td><code class="inl">PostRdmaSend</code> 里手工填的 <code class="inl">hns_roce_rc_sq_wqe</code>。</td></tr>
+      <tr><td><b>doorbell</b></td>
+        <td>“门铃”。把 WQE 填好后，写一个 doorbell 寄存器通知网卡来取活。不敲 doorbell，网卡不知道有新 WQE。</td>
+        <td><code class="inl">db = qp-&gt;wqn | ((head%65536)&lt;&lt;32) | (qp-&gt;sl&lt;&lt;48)</code>，然后 <code class="inl">DataCopyPad</code> 到 <code class="inl">qp-&gt;dbAddr</code>。</td></tr>
+      <tr><td><b>rkey / lkey</b></td>
+        <td>远端/本地内存注册后拿到的“钥匙”。WQE 里必须带 rkey，网卡才允许写对端那块内存（安全 + 地址翻译）。</td>
+        <td><code class="inl">MemDetails1.key</code>，分 <code class="inl">REMOTE_INPUT</code> / <code class="inl">LOCAL_OUTPUT</code> 两类。</td></tr>
+      <tr><td><b>window（窗口）</b></td>
+        <td>HCCL 预先注册好的一块 GM 区域，每张卡都有一份，且每张卡都能拿到对端窗口的地址。<b>窗口地址不是普通本地地址</b>，访问它时底层会自动路由：机内走 HCCS、跨机走 RoCE。</td>
+        <td><code class="inl">WindowIn(rank)</code>、<code class="inl">localWindowsIn</code>、<code class="inl">remoteRes[rank].windowsIn</code>。</td></tr>
+      <tr><td><b>fullmesh</b></td>
+        <td>全连接拓扑：每个 rank 与对端所有 rank 都建链。</td>
+        <td><code class="inl">BatchWrite=level1:fullmesh</code>（非分层跨机）。</td></tr>
+      <tr><td><b>hierarchy（分层）</b></td>
+        <td>分层拓扑：先机内、再机间，且机间只连“对端同号卡”。32 卡时每卡只有 1 条跨机链路。</td>
+        <td><code class="inl">BatchWrite=level1:hierarchy</code>（layered 的正确选择）。</td></tr>
+      <tr><td><b>pairwise</b></td>
+        <td>两两配对。常用于机间只连一个对端的场景。</td>
+        <td>本仓库现在写的 <code class="inl">AlltoAll=level0:fullmesh;level1:pairwise</code>。</td></tr>
+      <tr><td><b>layered（分层通信）</b></td>
+        <td>一种 MoE 通信方案：跨机只发给“同号卡”，由同号卡在本机内二次分发。好处是把跨机链路数从 O(N) 降到 O(1)，代价是多一跳本地转发。</td>
+        <td>本仓库 <code class="inl">notify_dispatch_normal_layered</code> 与参考仓库 <code class="inl">..._a2_layered.h</code>。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>0.3 框架、编译与运行</h3>
+  <table>
+    <thead><tr><th>名词</th><th>解释</th><th>在这份代码里</th></tr></thead>
+    <tbody>
+      <tr><td><b>CANN</b></td>
+        <td>昇腾的软件栈（驱动、runtime、HCCL、算子框架、编译器等）。版本很关键，不同版本的 HCCL 能力不同。</td>
+        <td>代码里 <code class="inl">DEEPEP_LAYERED_MIN_CANN_VERSION</code> 直接门控整个 kernel。</td></tr>
+      <tr><td><b>op_host / op_kernel</b></td>
+        <td>一个 Ascend 算子分两段：<b>op_host</b> 在主机 CPU 上跑（做 tiling、参数校验），<b>op_kernel</b> 在设备 AIV 上跑（真正计算/搬数据）。</td>
+        <td>目录 <code class="inl">ops/op_host/</code> 与 <code class="inl">ops/op_kernel/</code>。</td></tr>
+      <tr><td><b>tiling</b></td>
+        <td>主机侧根据输入 shape、属性、平台信息，把“怎么算/怎么切”算出来，写进一个结构体 TilingData 下发给 kernel。详见第 2 章。</td>
+        <td><code class="inl">notify_dispatch_normal_layered_tiling.cc</code>。</td></tr>
+      <tr><td><b>TilingData</b></td>
+        <td>tiling 的产物，一个 host 与 kernel <b>共享定义</b>的结构体。字段顺序必须严格一致，否则 kernel 读到垃圾。</td>
+        <td><code class="inl">NotifyDispatchNormalLayeredTilingData</code>。</td></tr>
+      <tr><td><b>TilingKey</b></td>
+        <td>一个整数，用来在 kernel 里选择不同的编译分支（不同实现）。tiling 里 <code class="inl">SetTilingKey(23)</code>，kernel 里 <code class="inl">TILING_KEY_IS(23)</code> 必须对上，否则进默认分支。</td>
+        <td>本仓库 notify 用 23；见 <code class="inl">notify_dispatch_normal_layered.cpp</code> 末尾。</td></tr>
+      <tr><td><b>BlockDim</b></td>
+        <td>kernel 启动多少个 block（可以理解为用多少个 AIV 核）。<code class="inl">SetBlockDim(aivNum)</code> 即“每个 AIV 核都跑一份”。</td>
+        <td><code class="inl">c-&gt;SetBlockDim(l.aivNum)</code>。</td></tr>
+      <tr><td><b>workspace</b></td>
+        <td>算子运行时可以用的临时 GM 空间，大小由 tiling 申请。</td>
+        <td><code class="inl">GetWorkspaceSizes(1)</code>；notify 申请计数片。</td></tr>
+      <tr><td><b>GetHcclContext</b></td>
+        <td>kernel 里拿“本次通信参数”的入口，返回 <code class="inl">HcclOpResParam</code> 指针。里面有窗口地址、remoteRes、<code class="inl">aiRMAInfo</code> 等。</td>
+        <td><code class="inl">AscendC::GetHcclContext&lt;HCCL_GROUP_ID_0&gt;()</code>。</td></tr>
+      <tr><td><b>引擎上下文 / EngineCtx</b></td>
+        <td>A5 上 HCCL 提供的一坨“通信运行时上下文”，host 创建后作为算子入参传进 kernel。里面是 channel 句柄、ipcBuffer 等。</td>
+        <td><code class="inl">CamMoeLayeredCommContext</code>、<code class="inl">HcclEngineCtxCreate/Acquire</code>。</td></tr>
+      <tr><td><b>Channel</b></td>
+        <td>A5 上“到某个对端的一条通信通道”的句柄。kernel 拿到句柄直接 <code class="inl">WriteNbi</code>，不需要自己拼 WQE。</td>
+        <td><code class="inl">hcommHandle[peer]</code>、<code class="inl">HcclChannelAcquire</code>。</td></tr>
+      <tr><td><b>hcomm</b></td>
+        <td>A5 上给 AIV 用的通信高层 API（<code class="inl">adv_api/hcomm</code>），封装了 Init / Write / Read。</td>
+        <td><code class="inl">roce_.Init</code>、<code class="inl">roce_.WriteNbi</code>。</td></tr>
+      <tr><td><b>KFC</b></td>
+        <td>Kernel Function Call。AIV 侧把“通信请求”写进共享队列，由 AICPU 侧的服务程序取走并执行。是 A3 上 AIV 与 AICPU 协作的机制。详见第 8 章。</td>
+        <td><code class="inl">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code> 背后就是 KFC。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>0.4 MC2 专有</h3>
+  <table>
+    <thead><tr><th>名词</th><th>解释</th><th>在这份代码里</th></tr></thead>
+    <tbody>
+      <tr><td><b>MC2</b></td>
+        <td>“融合算子”形态：把计算（MatMul/通信）和集合通信放进同一个算子，由 HCCL 参与调度，减少一次 kernel 启动与一次数据落盘。</td>
+        <td>op 注册时 <code class="inl">this-&gt;MC2().HcclGroup("comm_group")</code>。</td></tr>
+      <tr><td><b>Mc2InitTiling</b></td>
+        <td>MC2 初始化配置块，由 HCCL 的 tiling 库生成，kernel 内 Hccl 客户端用它建立通信视图（我是谁、world 多大）。</td>
+        <td>TilingData 的第一个 MC2 字段。</td></tr>
+      <tr><td><b>Mc2CcTiling</b></td>
+        <td>MC2 通信算法配置块：编码了 opType + algConfig。<b>HCCL 靠它决定建什么资源、和谁建链。</b></td>
+        <td>TilingData 的第二个 MC2 字段；kernel 用 <code class="inl">SetCcTilingV2(offsetof(...))</code> 登记。</td></tr>
+      <tr><td><b>Mc2CcTilingConfig</b></td>
+        <td>host 侧生成上面两个 blob 的工具类：<code class="inl">Mc2CcTilingConfig(group, opType, algConfig)</code> + <code class="inl">GetTiling(...)</code>。</td>
+        <td>本仓库 <code class="inl">SetComm()</code>、参考仓库 <code class="inl">mc2CcTilingConfig</code>。</td></tr>
+      <tr><td><b>aiRMAInfo</b></td>
+        <td>HCCL 回填的 <b>QP 表指针</b>，类型 <code class="inl">HcclAiRMAInfo*</code>。A3 上它是否为 0，直接决定 <code class="inl">PostRdmaSend</code> 能不能工作。</td>
+        <td><code class="inl">context_-&gt;aiRMAInfo</code>；现象里它就是 0。</td></tr>
+      <tr><td><b>AI-RMA</b></td>
+        <td>Ascend 的 RDMA 能力集合（QP 表 + WQE 格式 + 内存描述表）。让 AIV 能自己发 RDMA 写，不用 CPU 代劳。</td>
+        <td><code class="inl">HcclAiRMAInfo / HcclAiRMAWQ / HcclAiRMAMemInfo</code>。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ================= 1 ================= -->
+<section id="s1">
+  <h2 class="sec"><span class="num">1</span>背景：MoE、layered 与 notify 算子</h2>
+
+  <h3>1.1 MoE 的 dispatch / combine 为什么是通信问题</h3>
+  <p>MoE（Mixture of Experts）模型里，每个 token 只激活少数几个专家。专家分布在不同的卡上，所以要先做一次 <b>dispatch</b>：把 token 按路由结果发到对应专家的卡；专家算完后再做一次 <b>combine</b>：把结果按原路送回。这两步本质都是“不等长的 All-to-All”。</p>
+  <p>问题在于：如果每张卡都直接和对端所有卡建链（fullmesh），32 卡时每卡要维护 16 条跨机链路，交换机压力和建链开销都很大。于是有了 <b>layered（分层）</b>。</p>
+
+  <h3>1.2 layered 的核心：跨机只走同号卡</h3>
+  <p>把 rank 按机器分组：<code class="inl">rankInServer = rank % ranksPerServer</code>，<code class="inl">serverId = rank / ranksPerServer</code>。分层方案规定：</p>
+  <ul>
+    <li>跨机时，本机第 i 号卡只发给对端第 i 号卡（同号卡），一条链路；</li>
+    <li>到达对端后，由同号卡在本机内再分发给本机其他卡（走 HCCS，快）。</li>
+  </ul>
+  <p>这就是代码里的寻址公式：</p>
+  <pre><span class="c">// 目标 server 的同号卡</span>
+<span class="k">const</span> uint32_t proxyRank = target * info_.ranksPerServer + info_.rankInServer;</pre>
+  <p>当 <code class="inl">target</code> 遍历 0..serverNum-1 时，<code class="inl">proxyRank</code> 分别等于本机同号卡、对端同号卡……所以“跨机只连一条、机内全连”是写死在寻址里的。</p>
+
+  <h3>1.3 notify 算子在做什么：14 个 stage</h3>
+  <p>notify 不搬 token 本体，它只同步“元数据”：每个 server 要发多少 packet、每个专家要收多少 member、行号基址是多少。它跑完，dispatch/combine 才知道该往哪写。</p>
+  <p><code class="inl">Process()</code> 里每个 stage 之间都有一次全核同步（<code class="inl">StageBoundary</code>），因此“最后一个打印出来的 stage 号”就直接指明卡死位置。</p>
+  <table>
+    <thead><tr><th>stage</th><th>函数</th><th>做什么</th><th>通信?</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>—</td><td>入口同步</td><td>—</td></tr>
+      <tr><td>2</td><td><code class="inl">Cleanup</code></td><td>清零 plan 元数据与每个 AIV 的私有计数片</td><td>本地</td></tr>
+      <tr><td>3</td><td><code class="inl">InitPlanHeader</code></td><td>初始化 plan 头与状态</td><td>本地</td></tr>
+      <tr><td>4</td><td><code class="inl">BuildLocalRoutePlanParallel</code></td><td>按 topk_idx 建立本地路由关系（token→专家）</td><td>本地</td></tr>
+      <tr><td>5</td><td><code class="inl">ReduceLocalCounts</code></td><td>合并多 AIV 的计数</td><td>本地</td></tr>
+      <tr><td><b>6</b></td><td><code class="inl">PublishCountControls</code></td><td><b>跨机发送 CountControl 给同号卡</b></td><td><b>跨机</b></td></tr>
+      <tr><td><b>7</b></td><td><code class="inl">AggregateServerCounts</code></td><td><b>本机内重排并转发给 server 内其他 rank</b></td><td><b>机内</b></td></tr>
+      <tr><td>8</td><td><code class="inl">ApplyProxyAggregatesToOwner</code></td><td>等数据到达，按专家重排，记录 recv_x</td><td>机内</td></tr>
+      <tr><td>9</td><td><code class="inl">FanoutBaseAckSlicesToProxies</code></td><td>把行号发给本地 proxy</td><td>机内</td></tr>
+      <tr><td>10</td><td><code class="inl">WaitAllBaseAckSlices</code></td><td>等本地 rank 收齐</td><td>机内</td></tr>
+      <tr><td>11</td><td><code class="inl">AssembleBaseAcksAtProxies</code></td><td>inbuffer 搬到 outbuffer</td><td>本地</td></tr>
+      <tr><td>12</td><td><code class="inl">PublishBaseAcksFromProxies</code></td><td>直接 RDMA 发送（无需重排）</td><td><b>跨机</b></td></tr>
+      <tr><td>13</td><td><code class="inl">ApplyAllReturnedRowBases</code></td><td>等数据收齐，回填每个 member 的行号</td><td>机内</td></tr>
+      <tr><td>14</td><td>—</td><td>整个接收计划完成</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <h3>1.4 故障现象与定位方法</h3>
+  <p>A3 双机跑起来后，日志停在 <code class="inl">stage 6</code>：走 <code class="inl">PublishCountControls</code> 的 AIV 核里，跨机那一支在 <code class="inl">PostRdmaSend</code> 第一句就空指针退出；另一部分核在 <code class="inl">StageBoundary(7)</code> 的 <code class="inl">SyncAll</code> 等它，于是全体挂死。</p>
+  <p>定位手法（也是后面自查同类问题的方法）：</p>
+  <ul>
+    <li><b>按核过滤打点</b>：只让 AIV0/AIV1 打 <code class="inl">[ln]</code>，避免每核缓冲把关键日志挤掉；</li>
+    <li><b>零解引用探针</b>：只读指针值、不解引用，例如 <code class="inl">LoadQpDesc</code>，这样即使 QP 表坏了也能打印出 <code class="inl">info=0</code>；</li>
+    <li><b>host trace</b>：<code class="inl">[ln-host]</code> 双写 stderr 与 <code class="inl">/tmp/deepep_layered_host.log</code>，用来判断异常发生在 host 建上下文阶段还是 kernel 里。</li>
+  </ul>
+  <p>最终拿到的关键证据就一条：<code class="inl">[ln] qp dst=31 info=0 num=0</code> —— <code class="inl">aiRMAInfo</code> 是空指针。</p>
+</section>
+
+<!-- ================= 2 ================= -->
+<section id="s2">
+  <h2 class="sec"><span class="num">2</span>tiling 阶段到底在做什么（重点）</h2>
+  <p>你说还没接触过 tiling，这一章就从“为什么需要它”讲起，再到普通算子例子、再到 MC2 多了什么，最后讲它和 QP 表的关系。看完应该能独立读懂 <code class="inl">notify_dispatch_normal_layered_tiling.cc</code>。</p>
+
+  <h3>2.1 为什么必须有 tiling：三条硬约束</h3>
+  <p>GPU 的 CUDA kernel 里，线程块大小、共享内存大小是“运行时由你写代码决定”的；Ascend 不完全一样：<b>算子编译时就要确定“用多少核、每核处理哪一段、片上内存怎么切”</b>，这些决策在 host 侧做完，产物就是 TilingData。原因有三个：</p>
+  <ol>
+    <li><b>并行度必须提前定</b>：一个芯片有多少 AIV 是平台属性，kernel 里 <code class="inl">GetBlockIdx()</code> 只能知道“我是第几号核”，但“一共开了几个核、每个核负责哪段数据”必须由 host 通过 <code class="inl">SetBlockDim</code> + TilingData 告诉它。</li>
+    <li><b>片上内存极小</b>：UB 只有百 KB 级，且要求 32B 对齐。一次能搬多少元素、要不要分块（tile）、每块多大，必须在 host 算好，否则 kernel 里现算既慢又容易越界。这也是“tiling（切砖）”这个名字的由来。</li>
+    <li><b>kernel 不能动态申请资源</b>：workspace 大小、UB buffer 布局、循环次数，都要在编译/下发前确定。kernel 里只能按 TilingData 里的数字去 <code class="inl">InitBuffer</code>、去循环。</li>
+  </ol>
+  <div class="callout info">
+    <b>一句话</b>
+    tiling = 在 host 上把“硬件资源 + 输入形状”翻译成“kernel 能直接执行的数字”，写进一个共享结构体。
+  </div>
+
+  <h3>2.2 一个普通 AscendC 算子的 tiling 长什么样</h3>
+  <p>先把 MC2 的部分拿掉，看最小骨架。下面是一个假想的“逐元素加”算子的 tiling：</p>
+  <pre><span class="c">// 1) host 与 kernel 共享的结构体（放在 op_kernel/*.h，两边都 include）</span>
+<span class="k">struct</span> <span class="n">AddTilingData</span> {
+    uint32_t totalElements;   <span class="c">// 一共多少元素</span>
+    uint32_t tileElements;    <span class="c">// 每个 tile 多少元素（受 UB 限制）</span>
+    uint32_t coreNum;         <span class="c">// 用了几个 AIV</span>
+};
+
+<span class="c">// 2) host tiling 函数</span>
+ge::graphStatus <span class="n">AddTiling</span>(gert::TilingContext* c) {
+    <span class="k">auto</span>* d = c-&gt;GetTilingData&lt;AddTilingData&gt;();   <span class="c">// 拿到要填的结构体</span>
+    <span class="k">auto</span> platform = platform_ascendc::PlatformAscendC(c-&gt;GetPlatformInfo());
+    uint32_t aivNum = platform.GetCoreNumAiv();          <span class="c">// 平台有几个 AIV</span>
+    uint64_t ubSize = 0;
+    platform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
+
+    uint64_t total = c-&gt;GetInputShape(0)-&gt;GetStorageShape().GetShapeSize();
+    d-&gt;coreNum     = aivNum;
+    d-&gt;tileElements = (ubSize / <span class="k">sizeof</span>(<span class="k">float</span>) / 2U) / 32U * 32U; <span class="c">// 留一半、32 对齐</span>
+    d-&gt;totalElements = total;
+
+    c-&gt;SetBlockDim(aivNum);        <span class="c">// 启动 aivNum 个 block</span>
+    c-&gt;SetTilingKey(1U);          <span class="c">// 选择 kernel 分支</span>
+    c-&gt;GetWorkspaceSizes(1)[0] = 0;  <span class="c">// 不需要 workspace</span>
+    <span class="k">return</span> ge::GRAPH_SUCCESS;
+}
+
+<span class="c">// 3) kernel 侧读取</span>
+<span class="k">extern</span> <span class="s">"C"</span> __global__ __aicore__ <span class="k">void</span> add(GM_ADDR x, GM_ADDR y, GM_ADDR tiling) {
+    GET_TILING_DATA_WITH_STRUCT(AddTilingData, data, tiling); <span class="c">// 解出结构体</span>
+    <span class="k">if</span> (TILING_KEY_IS(1)) { <span class="c">/* 用 data.tileElements 分块处理 */</span> }
+}</pre>
+  <p>要点：</p>
+  <ul>
+    <li><code class="inl">GetTilingData&lt;T&gt;()</code> 返回的是“已经被框架分配好、等着你填”的结构体指针，<b>不是让你 new 一个</b>。</li>
+    <li><code class="inl">SetBlockDim</code> / <code class="inl">SetTilingKey</code> / workspace 都是 host 侧一次性声明的“启动参数”。</li>
+    <li>结构体必须放共享头文件，host/kernel 各 include 同一份。这是第 2.4 节要讲的 ABI 契约。</li>
+  </ul>
+
+  <h3>2.3 本仓库 notify 的 tiling 实际做了什么</h3>
+  <p>把 <code class="inl">NotifyTiling</code> 拆成四段看：</p>
+  <h4>(1) 校验输入与拓扑</h4>
+  <pre><span class="k">const</span> <span class="k">int64_t</span> world = Attr(c, WORLD), rank = Attr(c, RANK), ranks = Attr(c, RANKS), ...
+OP_TILING_CHECK(!d || !Shape2D(s, bs, k) || ... || world % ranks || world / ranks &gt; MAX_SERVERS ...,
+                OP_LOGE(n, <span class="s">"invalid normal layered notify inputs or topology"</span>), <span class="k">return</span> GRAPH_FAILED);</pre>
+  <p>tiling 是唯一能在“下发前”拦住非法参数的地方。比如 <code class="inl">world % ranks</code> 必须为 0（每机卡数整除），否则后面的 <code class="inl">rankInServer</code> 寻址就错了。这类检查放在 host 上，失败会直接报错，不会把一个坏 kernel 发到设备上挂死。</p>
+
+  <h4>(2) 算各种 stride 与 offset（“切砖”的核心）</h4>
+  <pre><span class="c">// 专家前缀表、packet 槽位、recordStride、partialStride、window 布局……</span>
+<span class="k">const</span> uint64_t prefixBytes = CamMoeLayered::AlignUp64(expertsU * <span class="k">sizeof</span>(int32_t)) + ...
+OP_TILING_CHECK(prefixBytes &gt; SHARED_WORK_UB_BYTES / 2U,
+                OP_LOGE(n, <span class="s">"normal layered notify prefix table exceeds UB capacity"</span>), ...);
+...
+<span class="k">auto</span> w = CamMoeLayered::MakeWindowLayout(...);
+OP_TILING_CHECK(... !CamMoeLayeredHost::ValidWindowCapacity(w, Mc2TilingUtils::GetMaxWindowSize()) ...,
+                OP_LOGE(n, <span class="s">"normal layered window layout or HCCL buffer capacity is invalid ..."</span>), ...);</pre>
+  <p>这一段看起来很“算术”，但每一行都对应 kernel 里的一次 <code class="inl">DataCopy</code> 或一个数组下标。tiling 的错误往往不是“算错一个数”这么简单，而是<b>算出的布局超出了 UB/窗口容量</b>，所以这里有大量 <code class="inl">FitsUint32</code> / <code class="inl">MulFits</code> / <code class="inl">AddFits</code> 防溢出检查。</p>
+
+  <h4>(3) 填业务字段</h4>
+  <pre><span class="k">auto</span> &amp;l = d-&gt;layered;
+l.epWorldSize = world;
+l.epRankId = rank;
+l.ranksPerServer = ranks;
+l.serverNum = world / ranks;
+l.rankInServer = rank % ranks;
+l.aivNum = platform.GetCoreNumAiv();
+l.totalUbSize = ...;
+l.recordStride = ...;
+l.planElements = ...;</pre>
+  <p>这些字段就是 kernel 里 <code class="inl">info_.xxx</code> 的来源。<b>host 填什么，kernel 就读到什么</b>，没有第二处真相。</p>
+
+  <h4>(4) 设置 MC2 通信配置（与 QP 表直接相关）</h4>
+  <pre><span class="k">void</span> SetComm(NotifyDispatchNormalLayeredTilingData *d, <span class="k">const</span> std::string &amp;g)
+{
+    AscendC::Mc2CcTilingConfig c(g, <span class="n">8U</span>, <span class="s">"AlltoAll=level0:fullmesh;level1:pairwise"</span>);
+    c.SetCommEngine(mc2tiling::<span class="n">AIV_ENGINE</span>);
+    c.GetTiling(d-&gt;mc2InitTiling);
+    c.GetTiling(d-&gt;mc2CcTiling);
+}</pre>
+  <div class="callout bad">
+    <b>这就是问题的源头</b>
+    这里声明的是「AlltoAll + AIV 引擎」。HCCL 收到这个意图后，按集合通信准备资源，<b>不会给 AIV 准备单边写的 QP 表</b>，所以 <code class="inl">aiRMAInfo</code> 保持 0。第 6 章会给出正确写法。
+  </div>
+
+  <h3>2.4 TilingData 是 host 与 kernel 的 ABI 契约</h3>
+  <p>“ABI”听起来很重，其实就一句话：<b>host 往内存里按字段顺序写，kernel 按同样的字段顺序读</b>。所以有三条铁律：</p>
+  <ol>
+    <li><b>同一份头文件</b>。host 的 <code class="inl">.cc</code> 和 kernel 的 <code class="inl">.cpp</code> 必须 include 同一个 <code class="inl">*_tiling.h</code>，不能各写一份“看起来一样”的结构体。</li>
+    <li><b>不能随便加字段</b>。在中间插入一个字段，后面所有字段的偏移都会变 —— 而 kernel 是按旧偏移读的，结果就是“地址里全是垃圾”。</li>
+    <li><b>TilingKey 分支必须声明</b>。kernel 入口 <code class="inl">TILING_KEY_IS(23)</code> 让编译器生成对应 funcEntry；如果 host 设了 23 而 kernel 没声明，实际跑的是 key-0 的默认入口，可能什么都不做。</li>
+  </ol>
+  <pre><span class="c">// 共享结构体：op_kernel/notify_dispatch_normal_layered_tiling.h</span>
+<span class="k">struct</span> <span class="n">NotifyDispatchNormalLayeredTilingData</span> {
+    Mc2InitTiling mc2InitTiling;   <span class="c">// HCCL 初始化配置</span>
+    Mc2CcTiling   mc2CcTiling;     <span class="c">// HCCL 通信算法配置</span>
+    LayeredInfo   layered;         <span class="c">// 业务字段（rank、stride、offset…）</span>
+};
+
+<span class="c">// kernel 入口</span>
+REGISTER_TILING_DEFAULT(NotifyDispatchNormalLayeredTilingData);
+<span class="k">if</span> (TILING_KEY_IS(<span class="n">23</span>)) {
+    GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
+    ...
+}</pre>
+  <p>补充一个容易踩的坑：kernel 里 <code class="inl">GET_TILING_DATA_WITH_STRUCT</code> 需要一块 UB 暂存区，它通过 <code class="inl">GetTPipePtr()</code> 找。所以 <code class="inl">TPipe pipe;</code> 必须写在它之前（本仓库代码里就专门留了注释说明这一点，否则会出现 <code class="inl">507035</code> 这类“标量访问越界”的错）。</p>
+
+  <h3>2.5 MC2 比普通算子多了什么</h3>
+  <p>普通算子的 TilingData 只有业务字段。MC2 多了两个<b>不透明</b>（opaque）的通信配置块：</p>
+  <table>
+    <thead><tr><th>字段</th><th>内容</th><th>谁生成</th><th>谁消费</th></tr></thead>
+    <tbody>
+      <tr><td><code class="inl">mc2InitTiling</code></td><td>通信域初始化信息（rank、world、buffer 等）</td><td>HCCL tiling 库（host 调 <code class="inl">GetTiling</code>）</td><td>kernel 内 Hccl 客户端 <code class="inl">InitV2</code></td></tr>
+      <tr><td><code class="inl">mc2CcTiling</code></td><td>通信原语 + 算法（opType + algConfig）</td><td>同上</td><td>kernel 内 Hccl 客户端 <code class="inl">SetCcTilingV2</code></td></tr>
+    </tbody>
+  </table>
+  <p>关键认知：<b>这两个块不是我们定义的，里面的字段也不该由我们解析</b>。host 只负责“把意图（group/opType/algConfig）告诉 HCCL 的 tiling 库，把产物搬进 TilingData”；kernel 只负责“把产物交给 Hccl 客户端”。中间怎么编码是 HCCL 的内部实现。</p>
+  <p>也正因为如此，<code class="inl">Mc2CcTilingConfig</code> 的三个入参就是全部“沟通语言”：</p>
+  <pre>Mc2CcTilingConfig(group, opType, algConfig)</pre>
+  <table>
+    <thead><tr><th>参数</th><th>含义</th><th>写错会怎样</th></tr></thead>
+    <tbody>
+      <tr><td><code class="inl">group</code></td><td>通信域名（通常来自 op 属性，如 <code class="inl">"comm_group"</code>）</td><td>找不到通信域，tiling 直接失败或 kernel 初始化失败</td></tr>
+      <tr><td><code class="inl">opType</code></td><td>通信原语编号：8=AlltoAll、18=BatchWrite…</td><td>建错资源类型：用 8 时 HCCL 不准备 QP 表，<code class="inl">aiRMAInfo</code> 为 0</td></tr>
+      <tr><td><code class="inl">algConfig</code></td><td>算法/拓扑：<code class="inl">原语=level0:拓扑;level1:拓扑</code></td><td>建错链路：fullmesh 时每卡连对端所有卡，与 layered 的“同号卡”寻址不符</td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.6 两个 setter：SetCommEngine 与 SetAicpuBlockDim</h3>
+  <h4>SetCommEngine(AIV_ENGINE)</h4>
+  <p>告诉 HCCL：“这次通信的数据面由 AIV 直接驱动”。在 A5 上这是正确的，因为 950 的 HCCL 真的提供 <code class="inl">COMM_ENGINE_AIV</code>。在 A3 上这个声明本身不一定报错，但 A3 的 HCCL 没有对应的 AIV 引擎后端，等到 kernel 侧去取引擎上下文时就会失败（第 5 章有实测 <code class="inl">HCCL_E_PARA(1)</code>）。</p>
+  <h4>SetAicpuBlockDim(n)</h4>
+  <p>给 AICPU 侧的通信服务分配多少个“服务核”。参考实现写成：</p>
+  <pre>context-&gt;SetAicpuBlockDim(epWorldSize &gt; RANK_NUM_PER_NODE_A2
+                         ? mc2tiling::AICPU_NUM_BLOCKS_A2   <span class="c">// 跨机：6</span>
+                         : <span class="n">1</span>);                              <span class="c">// 单机：1</span></pre>
+  <p>为什么跨机要多给？因为跨机时 AICPU 要维护每个对端的 QP、处理更多 KFC 请求、跑更复杂的调度；单机只有机内链路，1 个就够。<b>不设这个值，AICPU 侧没有足够的服务核，通信初始化/调度会不完整。</b></p>
+
+  <h3>2.7 tiling 之后：配置怎么变成 QP 表</h3>
+  <div class="flow">
+    <div class="box"><b>host tiling</b>填 mc2InitTiling / mc2CcTiling（opType+algConfig）</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>框架</b>把 TilingData 交给 HCCL 参与本次执行</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>HCCL/AICPU</b>按 opType+algConfig 建窗口、建 QP、填内存描述表</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>launch</b>把 op param（含 aiRMAInfo）注入 kernel</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>kernel</b>Hccl 客户端 InitV2 + SetCcTilingV2，拿到非 0 的 aiRMAInfo</div>
+  </div>
+  <p>注意最后一格：<b>光 host 配对还不够，kernel 里必须明确“初始化并登记 CC tiling”</b>。参考实现里就是那两句 <code class="inl">InitV2</code> / <code class="inl">SetCcTilingV2</code>。我们现在的 kernel 一句都没有 —— 这解释了为什么即使 host 这边改了，表也可能还是 0。</p>
+
+  <h3>2.8 tiling 阶段自查清单</h3>
+  <ul>
+    <li>host 与 kernel 是否 include 同一个 tiling 头？字段顺序有没有被改过？</li>
+    <li><code class="inl">SetTilingKey</code> 与 kernel 的 <code class="inl">TILING_KEY_IS</code> 是否一致？</li>
+    <li>MC2 的 <code class="inl">GetTiling</code> 是否真的执行了、返回值是否检查过？（参考实现里是 <code class="inl">OP_TILING_CHECK(GetTiling(...) != 0, ...)</code>）</li>
+    <li>opType 与 kernel 侧要用的数据面是否匹配？（集合通信用 8 就别指望 QP 表）</li>
+    <li>algConfig 的拓扑与你的寻址公式是否一致？（layered 就该 hierarchy）</li>
+    <li>跨机时 <code class="inl">SetAicpuBlockDim</code> 给了吗？</li>
+    <li>kernel 里 Hccl 客户端初始化（InitV2/SetCcTilingV2）有吗？</li>
+  </ul>
+</section>
+
+<!-- ================= 3 ================= -->
+<section id="s3">
+  <h2 class="sec"><span class="num">3</span>一次 MC2 算子从 host 到 device 的全链路</h2>
+  <p>把第 2 章的内容放回整体流程：</p>
+  <div class="flow">
+    <div class="box"><b>① Host tiling</b>算布局、填 TilingData（含 MC2 两块）</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>② 框架下发</b>GE/aclnn 把 TilingData 与 op 属性交给 HCCL</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>③ HCCL 建资源</b>按 opType + algConfig 建窗口/通道/QP</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>④ 注入 op param</b>launch kernel 时带上 <code class="inl">HcclOpResParam</code></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>⑤ Kernel 运行</b>取上下文，发 WQE / 走通道 / 直写窗口</div>
+  </div>
+
+  <h3>3.1 ② 框架下发的关键：MC2 声明</h3>
+  <p>只有当算子注册时声明了 MC2，框架才会把它当融合算子处理，HCCL 才会参与：</p>
+  <pre><span class="c">// op 注册（示意）</span>
+<span class="k">this</span>-&gt;MC2().HcclGroup(<span class="s">"comm_group"</span>);</pre>
+  <p>没有这句，就是普通算子：<code class="inl">GetHcclContext</code> 拿到空，后面所有通信代码都不成立。</p>
+
+  <h3>3.2 ④ op param 里有什么</h3>
+  <pre><span class="c">// HcclOpParam / HcclOpResParam 的关键字段（示意）</span>
+<span class="k">struct</span> HcclOpParam {
+    uint32_t rankSize;
+    uint64_t localWindowsIn;              <span class="c">// 本卡窗口入地址</span>
+    uint64_t localWindowsOut;
+    HcclRankRelationResV2 *remoteRes;     <span class="c">// 每个远端 rank 的关系资源</span>
+    uint64_t winSize;
+    uint64_t sizeOfAiRMAInfo;
+    uint64_t aiRMAInfo;                   <span class="c">// ← QP 表指针（A3 上这里是 0）</span>
+};</pre>
+  <p>kernel 里 <code class="inl">GetHcclContext&lt;HCCL_GROUP_ID_0&gt;()</code> 拿到的就是它。注意 <code class="inl">remoteRes</code>：即使走方案 B（窗口直写），也要先从这个表里拿到对端窗口地址。所以“完全不依赖 HCCL”是不成立的，只是不依赖 <b>QP 表</b>而已。</p>
+
+  <h3>3.3 ⑤ kernel 的三条数据面写法</h3>
+  <table>
+    <thead><tr><th>写法</th><th>依赖</th><th>平台</th><th>代码</th></tr></thead>
+    <tbody>
+      <tr><td>读 <code class="inl">aiRMAInfo</code>，拼 WQE，敲 doorbell</td><td>QP 表</td><td>A3（AICPU 后端）/ A2</td><td><code class="inl">PostRdmaSend</code> 的 A3 分支</td></tr>
+      <tr><td><code class="inl">HcclChannel</code> + <code class="inl">hcomm</code> 直接发</td><td>通道句柄</td><td>A5（AIV 引擎）</td><td><code class="inl">roce_.WriteNbi</code></td></tr>
+      <tr><td>直接 <code class="inl">DataCopy</code> 到 <code class="inl">WindowIn(peer)</code></td><td>窗口地址</td><td>各平台通用</td><td>方案 B <code class="inl">CopyWindowBytes</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ================= 4 ================= -->
+<section id="s4">
+  <h2 class="sec"><span class="num">4</span>本仓库 A5 路径：为什么可以</h2>
+
+  <h3>4.1 host 侧：两件事</h3>
+  <p><b>第一件</b>是 tiling 声明用 AIV 引擎（注意：这套配法只对 A5 成立）：</p>
+  <pre><span class="c">// csrc/deepep/ops/op_host/notify_dispatch_normal_layered_tiling.cc</span>
+AscendC::Mc2CcTilingConfig c(g, <span class="n">8U</span>, <span class="s">"AlltoAll=level0:fullmesh;level1:pairwise"</span>);
+c.SetCommEngine(mc2tiling::<span class="n">AIV_ENGINE</span>);
+c.GetTiling(d-&gt;mc2InitTiling);
+c.GetTiling(d-&gt;mc2CcTiling);</pre>
+  <p><b>第二件</b>是在 <code class="inl">deep_ep.cpp</code> 里创建引擎上下文 <code class="inl">CamMoeLayeredCommContext</code>，作为算子第一个入参 <code class="inl">roceContext</code> 传进 kernel。它由三步生成：</p>
+  <pre>HcclCommMemReg(...)                       <span class="c">// 注册本卡可被对端访问的内存</span>
+HcclChannelAcquire(..., COMM_ENGINE_AIV, ...)   <span class="c">// 拿到每个对端的 channel 句柄</span>
+HcclEngineCtxCreate(..., COMM_ENGINE_AIV, ...)  <span class="c">// 把上下文放到 device 可读的位置</span></pre>
+  <p>上下文里装的是：<code class="inl">protocol</code>（roce/uboe）、<code class="inl">ipcBuffer[rank]</code>（每个 rank 的窗口地址）、<code class="inl">hcommHandle[peer]</code>（通道句柄）、<code class="inl">windowBytes</code>。</p>
+
+  <h3>4.2 kernel 侧：拿句柄直接发</h3>
+  <pre><span class="c">// cam_moe_layered_comm.h：__DAV_C310__ 分支（A5）</span>
+rdmaContext_ = (__gm__ CamMoeLayeredCommContext *)roceContext;
+<span class="k">if</span> (rdmaContext_-&gt;protocol == CAM_MOE_LAYERED_PROTOCOL_ROCE) {
+    hcommInitOk_ = roce_.Init(hcommUb, AscendC::HCOMM_UB_BUF_SIZE) == <span class="n">0</span>;
+} <span class="k">else</span> {
+    hcommInitOk_ = uboe_.Init(hcommUb, AscendC::HCOMM_UB_BUF_SIZE) == <span class="n">0</span>;
+}
+
+<span class="c">// 发送</span>
+<span class="k">return</span> roce_.WriteNbi&lt;<span class="k">true</span>, PIPE_S, PIPE_MTE3&gt;(GetChannel(dstRank), dst, src, bytes) == <span class="n">0</span>;</pre>
+  <p>注意 A5 分支里 <code class="inl">roceContext</code> 是有用的，而 <code class="inl">context_-&gt;aiRMAInfo</code> 压根不读。所以 A5 上 QP 表是不是 0 完全无所谓。</p>
+
+  <h3>4.3 为什么 A5 可以：条件拆开看</h3>
+  <div class="callout good">
+    <b>三个条件必须同时成立</b>
+    <ol>
+      <li><b>HCCL 有这个引擎</b>：950 的 HCCL 提供 <code class="inl">COMM_ENGINE_AIV</code>，<code class="inl">HcclChannelAcquire</code> / <code class="inl">HcclEngineCtxCreate</code> 都能成功。</li>
+      <li><b>硬件/驱动允许 AIV 直接驱动通信</b>：950 把通信能力下沉到了 AIV 可调用的 hcomm 接口，AIV 不需要另一个核代劳。</li>
+      <li><b>kernel 用了对的东西</b>：读 <code class="inl">roceContext</code>，用 <code class="inl">hcommHandle</code>，不碰 <code class="inl">aiRMAInfo</code>。</li>
+    </ol>
+  </div>
+  <p>反过来说，只要其中一条不成立，这条路径就断。A3 断在第 1 条（没有 AIV 引擎后端）。</p>
+</section>
+
+<!-- ================= 5 ================= -->
+<section id="s5">
+  <h2 class="sec"><span class="num">5</span>本仓库 A3 路径：两次尝试与失败原因</h2>
+
+  <h3>5.1 A3 走的是另一条分支</h3>
+  <pre><span class="c">// cam_moe_layered_comm.h：未定义 __DAV_C310__（A3）</span>
+context_  = (__gm__ HcclOpParam *)AscendC::GetHcclContext&lt;HCCL_GROUP_ID_0&gt;();
+<span class="hi">rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_-&gt;aiRMAInfo;</span>   <span class="c">// ← 这里是 0</span>
+...
+<span class="c">// PostRdmaSend 第一句就解引用</span>
+<span class="k">auto</span> qpNum = rdmaInfo_-&gt;qpNum;   <span class="c">// 空指针 → 该核直接退出</span></pre>
+  <p>而 <code class="inl">Process()</code> 里 stage 6 的跨机分支正是：</p>
+  <pre><span class="k">if</span> (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
+    CopyWindowBytes(payload, dst, layout_.controlStride);
+} <span class="k">else</span> {
+    comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
+}</pre>
+  <p>A3 的 <code class="inl">DirectWindowWrite()</code> 返回 <code class="inl">false</code>，所以跨机一定走 <code class="inl">PostRdmaSend</code>，一定空指针。</p>
+
+  <h3>5.2 尝试一：把 A5 的“建引擎上下文”搬到 A3（失败）</h3>
+  <p>思路很自然：A5 能 <code class="inl">HcclEngineCtxCreate(COMM_ENGINE_AIV)</code>，那 A3 也照做不就行了？实测结果是：</p>
+  <pre><span class="c">// csrc/deepep/cam_moe_layered_comm_context.cpp</span>
+fail step=engine-get code=<span class="n">1</span>      <span class="c">// HcclEngineCtxGet(comm, tag, COMM_ENGINE_AIV, ...) 返回 HCCL_E_PARA</span></pre>
+  <div class="callout bad">
+    <b>为什么 code=1 很关键</b>
+    <code class="inl">HCCL_E_PARA(1)</code> 是“参数/能力不支持”的硬错误；如果是“还没创建”，会返回 <code class="inl">HCCL_E_NOT_FOUND</code>。所以这不是时序问题、也不是 tag 写错，而是 <b>910_93 的 HCCL 根本没有 COMM_ENGINE_AIV 这个后端</b>。
+  </div>
+  <p>进一步佐证：参考仓库的 host 侧把后端按平台分成了两条路，A3 走的是 KFC，不是 EngineCtx（第 6 章详述）。</p>
+
+  <h3>5.3 尝试二：窗口直写（方案 B，已实现）</h3>
+  <p>既然拿不到 QP 表，就绕开它：<b>直接往对端窗口里写</b>。因为窗口地址是 HCCL 注册过的统一虚拟地址，写它时底层会自动路由（机内 HCCS、跨机 RoCE）。</p>
+  <pre><span class="c">// cam_moe_layered_comm.h</span>
+__aicore__ <span class="k">inline</span> <span class="k">bool</span> DirectWindowWrite() <span class="k">const</span> {
+<span class="k">#ifdef</span> __DAV_C310__
+    <span class="k">return</span> <span class="k">false</span>;   <span class="c">// A5 继续用 hcomm 通道</span>
+<span class="k">#else</span>
+    <span class="k">return</span> <span class="k">true</span>;    <span class="c">// A3 所有“发送”改成窗口拷贝</span>
+<span class="k">#endif</span>
+}</pre>
+  <p>调用点变成：</p>
+  <pre>proxyRank == info_.epRankId || comm_.DirectWindowWrite()
+    ? CopyWindowBytes(payload, dst, layout_.controlStride)      <span class="c">// 普通 GM→GM 拷贝</span>
+    : comm_.PostRdmaSend(payload, dst, proxyRank, ...);          <span class="c">// A5</span></pre>
+  <p>Read 侧同理，用 <code class="inl">LoadPeerWindow</code> 拿对端窗口地址后直接读。<code class="inl">CopyWindowBytes</code> 内部就是 <code class="inl">DataCopy</code> 走 <code class="inl">PIPE_MTE3</code>，并在前后加 <code class="inl">PipeBarrier</code> + cache 维护。</p>
+
+  <h3>5.4 方案 B 为什么能跨机</h3>
+  <p>关键认知：<b>窗口地址不是“本机物理地址”，而是 HCCL 注册的远端可寻址地址</b>。当你 <code class="inl">DataCopy</code> 到 <code class="inl">WindowIn(proxyRank)</code> 时：</p>
+  <ul>
+    <li>proxyRank 在本机 → 走 HCCS，直接访存；</li>
+    <li>proxyRank 在对端 → 请求被路由到 RoCE 网卡，由网卡完成封装与远端写入；</li>
+    <li>对端看到的是自己窗口里多了一段数据，不需要参与任何指令。</li>
+  </ul>
+  <p>所以“<code class="inl">DataCopy</code> 走的是 RoCE 不是 HCCS”这个疑问的答案是：<b>DataCopy 只是发起方，具体走哪条链路由地址所属的窗口决定，HCCL 已经把这个映射建好了</b>。</p>
+
+  <h3>5.5 方案 B 的边界</h3>
+  <div class="callout warn">
+    <b>它解决的是“数据面没有 QP 表”，不解决“控制面没有资源”</b>
+    <ul>
+      <li>窗口本身、<code class="inl">remoteRes</code> 仍然是 HCCL/AICPU 建的。如果 <code class="inl">remoteRes[rank]</code> 为空，窗口地址就是 0（我们曾出现 <code class="inl">rank1→17 dst=5280</code>，本质是窗口基址为 0 加了个偏移）。</li>
+      <li>性能上，每次发送都是一次 MTE3 搬运，没有 WQE 的批量提交与乱序流水，适合 notify 这种小消息控制面，不适合大流量数据面。</li>
+      <li>顺序语义要靠 flag + cache 维护自己保证（本仓库用单独的 flag 写 + <code class="inl">cacheWriteThrough</code>）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================= 6 ================= -->
+<section id="s6">
+  <h2 class="sec"><span class="num">6</span>参考实现 arch22：A3 上怎么拿到 QP 表</h2>
+  <p>参考代码在 <code class="inl">ops-transformer/mc2/moe_distribute_dispatch_v2</code> 的 <code class="inl">arch22</code> 目录（arch22 覆盖 A2/A3 架构）。它同样读 <code class="inl">aiRMAInfo</code>，但能拿到，差别就在下面几行。</p>
+
+  <h3>6.1 kernel 侧三句关键代码</h3>
+  <pre><span class="c">// moe_distribute_dispatch_a2_layered.h</span>
+<span class="n">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</span> hccl_;       <span class="c">// ① 通信客户端由 AICPU 服务</span>
+
+hccl_.<span class="hi">InitV2</span>(contextGM0, &amp;tilingData);       <span class="c">// ② 用 op param + tiling 初始化</span>
+hccl_.<span class="hi">SetCcTilingV2</span>(offsetof(MoeDistributeDispatchA2TilingData, mc2CcTiling)); <span class="c">// ③ 登记 CC tiling</span>
+
+qp_info_ = (__gm__ HcclAiRMAInfo *)(((__gm__ HcclA2CombineOpParam *)contextGM0)-&gt;<span class="hi">aiRMAInfo</span>);</pre>
+  <table>
+    <thead><tr><th>代码</th><th>作用</th><th>不做会怎样</th></tr></thead>
+    <tbody>
+      <tr><td><code class="inl">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code></td><td>声明 kernel 内 HCCL 客户端由 AICPU 提供服务（KFC）</td><td>server type 不对，HCCL 调用行为不对/不可用</td></tr>
+      <tr><td><code class="inl">InitV2(context, &amp;tiling)</code></td><td>把 op param 与 TilingData 一起交给 Hccl 客户端，读 <code class="inl">mc2InitTiling</code> 建立通信视图</td><td>HCCL 不知道本次通信的域/rank 信息</td></tr>
+      <tr><td><code class="inl">SetCcTilingV2(offset)</code></td><td>把 <code class="inl">mc2CcTiling</code> 在 TilingData 中的<b>偏移</b>告诉 HCCL，HCCL 据此按 opType+algConfig 初始化，并回填 <code class="inl">aiRMAInfo</code></td><td><b><code class="inl">aiRMAInfo</code> 保持 0</b>，正是我们的现象</td></tr>
+    </tbody>
+  </table>
+  <div class="callout info">
+    <b>为什么要传 offset 而不是指针</b>
+    kernel 拿到的 <code class="inl">tilingData</code> 是设备侧地址，host 无法预先知道它的绝对值；但“<code class="inl">mc2CcTiling</code> 相对结构体开头的偏移”是编译期常量，所以用 <code class="inl">offsetof</code>。HCCL 拿到 <code class="inl">(char*)&amp;tilingData + offset</code> 就能定位。
+  </div>
+
+  <h3>6.2 host 侧 tiling：三件事</h3>
+  <pre><span class="c">// moe_distribute_dispatch_v2_tiling_arch22.cpp</span>
+<span class="c">// ① 跨机时给 AICPU 分配足够的服务核（单机为 1）</span>
+context-&gt;<span class="hi">SetAicpuBlockDim</span>(info.epWorldSize &gt; RANK_NUM_PER_NODE_A2 ? mc2tiling::AICPU_NUM_BLOCKS_A2 : <span class="n">1</span>);
+
+<span class="c">// ② 按“单机 / 跨机非分层 / 跨机分层”选算法</span>
+std::string algConfig = epWorldSize &lt;= RANK_NUM_PER_NODE_A2 ? <span class="s">"BatchWrite=level0:fullmesh"</span>
+                       : (isLayered ? <span class="s">"BatchWrite=level1:hierarchy"</span>
+                                    : <span class="s">"BatchWrite=level1:fullmesh"</span>);
+
+<span class="c">// ③ opType = 18（BatchWrite，而不是 8 AlltoAll）</span>
+AscendC::Mc2CcTilingConfig mc2CcTilingConfig(group, <span class="n">18</span>, algConfig);
+mc2CcTilingConfig.GetTiling(tilingData-&gt;mc2InitTiling);
+mc2CcTilingConfig.GetTiling(tilingData-&gt;mc2CcTiling);</pre>
+  <p>这三件与我们现状的差异是：<b>opType 从 8 改 18、algConfig 改 BatchWrite、补 SetAicpuBlockDim、去掉 AIV_ENGINE</b>。</p>
+
+  <h3>6.3 <code class="inl">isLayered ? "BatchWrite=level1:hierarchy" : ...</code> 到底在说什么</h3>
+  <p>algConfig 的语法是 <code class="inl">原语=层级:拓扑[;层级:拓扑]</code>：</p>
+  <ul>
+    <li><b>level0</b> = 机内（server 内）；<b>level1</b> = 机间（server 间）；</li>
+    <li><b>fullmesh</b> = 与对端所有 rank 建链；<b>hierarchy</b> = 分层，机间只连同号卡；<b>pairwise</b> = 两两配对。</li>
+  </ul>
+  <table>
+    <thead><tr><th>场景</th><th>algConfig</th><th>含义</th><th>每卡跨机链路（32 卡）</th></tr></thead>
+    <tbody>
+      <tr><td>单机 ≤16 卡</td><td><code class="inl">BatchWrite=level0:fullmesh</code></td><td>机内两两直连，不出机</td><td>0</td></tr>
+      <tr><td>跨机、非分层</td><td><code class="inl">BatchWrite=level1:fullmesh</code></td><td>每卡与对端所有卡建链</td><td>16</td></tr>
+      <tr><td><b>跨机、分层</b></td><td><code class="inl">BatchWrite=level1:hierarchy</code></td><td><b>只与对端同号卡建链</b></td><td><b>1</b></td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">
+    <b>为什么 layered 必须选 hierarchy</b>
+    我们的寻址是 <code class="inl">proxyRank = target*ranksPerServer + rankInServer</code>，即“只找同号卡”。如果 HCCL 按 fullmesh 建了 16 条链路，不仅浪费，QP 表里“每个 dstRank 一个 QP 组”的布局也可能与我们的 <code class="inl">dstRank*qpNum*sizeOfAiRMAWQ</code> 假设不一致。
+  </div>
+
+  <h3>6.4 为什么 opType 是 18 而不是 8</h3>
+  <p>opType 决定 HCCL 为“哪种通信原语”准备资源：</p>
+  <ul>
+    <li><b>8 = AlltoAll</b>：集合通信。数据面由 HCCL 内部（AICPU 调度）执行，AIV 只提供输入输出。<b>HCCL 没有理由把发送队列暴露给 AIV</b>，所以不填 <code class="inl">aiRMAInfo</code>。</li>
+    <li><b>18 = BatchWrite</b>：批量单边写。AIV 要自己发 WQE，HCCL 就必须把每个目的 rank 的 QP/SQ/WQ 与远端内存描述表交出来，于是 <code class="inl">aiRMAInfo</code> 非 0。</li>
+  </ul>
+  <p>一句话：<b>你告诉 HCCL “我要自己发”，它才给你发件工具；你说“你来发”，它就不给。</b></p>
+
+  <h3>6.5 host 侧还有一条 KFC 路径（佐证 A3 能建资源）</h3>
+  <p>参考仓库的 <code class="inl">mc2/common/torch_extension/csrc/comm_context.cpp</code> 里有个 <code class="inl">KfcContextBuilder</code>，是 A3/A2 用的：</p>
+  <pre>HcclKfcAllocOpArgs(&amp;opArgs);
+HcclKfcOpArgsSetCommEngine(opArgs, COMM_ENGINE_AIV);          <span class="c">// 4</span>
+HcclKfcOpArgsSetAlgConfig(opArgs, <span class="s">"BatchWrite=level1:hierarchy"</span>);  <span class="c">// 910B 多机</span>
+HcclCreateOpResCtx(commHandle, <span class="c">/*opType=*/</span><span class="n">18</span>, opArgs, &amp;opsResCtx);
+mc2Context.kfcContextAddr = (uint64_t)opsResCtx;</pre>
+  <p>它同样按平台选配置：</p>
+  <pre><span class="k">const</span> std::string algConfig = is910B &amp;&amp; isMultiServer
+    ? <span class="s">"BatchWrite=level1:hierarchy"</span>
+    : <span class="s">"AlltoAll=level0:fullmesh;level1:pairwise"</span>;
+<span class="k">const</span> uint32_t opType = is910B &amp;&amp; isMultiServer ? <span class="n">18</span> : <span class="n">8</span>;</pre>
+  <p>这说明：<b>A3 上“建 QP 资源”的入口叫 KFC / OpResCtx，不叫 EngineCtx</b>。我们之前用 A5 的 EngineCtx 去碰 A3，自然拿 <code class="inl">HCCL_E_PARA</code>。</p>
+
+  <h3>6.6 为什么“三句 + 三项”就能让表非 0：时序解释</h3>
+  <ol>
+    <li>host tiling 把“BatchWrite + hierarchy”写进 <code class="inl">mc2CcTiling</code>；</li>
+    <li>框架把 TilingData 交给 HCCL，HCCL 在 AICPU 侧按 BatchWrite 建 QP、建内存描述表；</li>
+    <li>kernel launch 时，op param 里预留了 <code class="inl">aiRMAInfo</code> 字段（此时可能还是 0）；</li>
+    <li>kernel 调 <code class="inl">InitV2</code>：Hccl 客户端向 AICPU 报到，绑定通信域；</li>
+    <li>kernel 调 <code class="inl">SetCcTilingV2(offset)</code>：客户端按该偏移读 <code class="inl">mc2CcTiling</code>，把“本次要 BatchWrite”告诉 AICPU 服务，服务把 QP 表地址写回 op param；</li>
+    <li>之后再读 <code class="inl">aiRMAInfo</code> 就是非 0。</li>
+  </ol>
+  <p>我们现在的代码跳过了第 4、5 步，所以永远停在第 3 步的 0。</p>
+</section>
+
+<!-- ================= 7 ================= -->
+<section id="s7">
+  <h2 class="sec"><span class="num">7</span>两份实现的逐项差异与原因</h2>
+  <table>
+    <thead><tr><th>维度</th><th>本仓库 notify（当前）</th><th>参考 arch22</th><th>影响 / 原因</th></tr></thead>
+    <tbody>
+      <tr><td>opType</td><td>8（AlltoAll）</td><td><b>18（BatchWrite）</b></td><td>决定是否准备 QP/SQ：集合通信不暴露发送队列</td></tr>
+      <tr><td>algConfig</td><td><code class="inl">AlltoAll=level0:fullmesh;level1:pairwise</code></td><td><b><code class="inl">BatchWrite=level1:hierarchy</code></b></td><td>决定跨机链路拓扑，必须与 layered 的同号卡寻址一致</td></tr>
+      <tr><td>通信引擎声明</td><td><code class="inl">SetCommEngine(AIV_ENGINE)</code></td><td>不设（AICPU 后端）</td><td>A3 没有 AIV 引擎后端</td></tr>
+      <tr><td>AICPU 服务核</td><td>未设置</td><td><b>跨机 6 / 单机 1</b></td><td>跨机需要更多调度资源</td></tr>
+      <tr><td>kernel 通信初始化</td><td><b>无 <code class="inl">InitV2</code></b></td><td>有</td><td>HCCL 不知道通信域</td></tr>
+      <tr><td>kernel CC tiling 登记</td><td><b>无 <code class="inl">SetCcTilingV2</code></b></td><td>有</td><td><b><code class="inl">aiRMAInfo</code> 保持 0</b></td></tr>
+      <tr><td>上下文类型</td><td><code class="inl">HcclOpParam</code>（经 <code class="inl">GetHcclContext</code>）</td><td><code class="inl">HcclA2CombineOpParam</code>（经 contextGM0）</td><td>字段布局相近但不保证相同，跨版本要按头文件对</td></tr>
+      <tr><td>数据面</td><td>A3：<code class="inl">PostRdmaSend</code> 需 QP 表<br>A5：hcomm 通道</td><td>QP 表 + WQE</td><td>A3 上我们只缺“表”，发送逻辑本身一致</td></tr>
+      <tr><td>失败表现</td><td>stage 6 空指针 → SyncAll 互等挂死</td><td>正常推进</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">
+    <b>要点</b>
+    我们的 WQE 构造、寻址公式、doorbell 写法与参考实现一致，所以真正要补的是 <b>host tiling 三项 + kernel 两句初始化</b>，而不是重写发送代码。
+  </div>
+
+  <h3>7.1 补上之后的预期</h3>
+  <ol>
+    <li>HCCL 按 BatchWrite 建 QP，<code class="inl">aiRMAInfo != 0</code>，<code class="inl">qpNum &gt; 0</code>；</li>
+    <li><code class="inl">PostRdmaSend</code> 能正常构造 WQE 并写对端；</li>
+    <li>stage 6 的 <code class="inl">701 → 703 → 704</code>、stage 7 的 <code class="inl">801 → 802</code> 依次出现，双机不再互等。</li>
+  </ol>
+</section>
+
+<!-- ================= 8 ================= -->
+<section id="s8">
+  <h2 class="sec"><span class="num">8</span>AICPU 到底是什么（重点）</h2>
+  <p>你之前问“AICPU 是什么，我根本不知道”，这一章专门讲清它，以及它为什么在 A3 上不可替代。</p>
+
+  <h3>8.1 AICPU 在芯片里的位置</h3>
+  <p>一颗 Ascend 训练芯片里通常有三类“处理器”：</p>
+  <table>
+    <thead><tr><th>类型</th><th>擅长</th><th>是否参与算子主体计算</th></tr></thead>
+    <tbody>
+      <tr><td><b>AIC（Cube）</b></td><td>矩阵乘</td><td>是</td></tr>
+      <tr><td><b>AIV（Vector）</b></td><td>向量运算、搬运（DataCopy）</td><td>是；我们 notify 就跑在它上面</td></tr>
+      <tr><td><b>AICPU</b></td><td>通用标量控制流、协议栈、任务调度</td><td><b>否</b>，它给 AI Core 打辅助</td></tr>
+    </tbody>
+  </table>
+  <p>AICPU 是 ARM 架构的通用核，有自己的指令集，能跑复杂分支、能访问网络设备、能做内存管理。你可以把它理解成“芯片内的一个小 Linux 侧控制面”，专门处理 AI Core 不擅长的杂活。</p>
+
+  <h3>8.2 为什么通信控制面必须放在 AICPU</h3>
+  <p>RDMA/集合通信的控制面其实非常“重”：</p>
+  <ul>
+    <li><b>建链</b>：和每个对端交换 QP 信息、协商参数；</li>
+    <li><b>内存注册</b>：把窗口地址注册给网卡，换回 rkey/lkey；</li>
+    <li><b>QP 状态机</b>：RESET → INIT → RTR → RTS，每一步都要按协议改状态；</li>
+    <li><b>重传/拥塞/错误处理</b>：分支密集、事件驱动；</li>
+    <li><b>集合通信算法调度</b>：Ring/Tree/分层算法要按 rank 计算每一轮发谁收谁。</li>
+  </ul>
+  <p>这些活有两个特点：<b>分支多、要访问外设（网卡）</b>。AIV 是 SIMD 计算核，跑这种控制流效率极低，而且通常不能直接操作网卡寄存器。所以 A3 的设计是：<b>控制面交给 AICPU，数据面交给 AIV</b>。</p>
+
+  <h3>8.3 KFC：AIV 与 AICPU 怎么协作</h3>
+  <p><b>KFC = Kernel Function Call</b>。可以把它类比成“kernel 里的远程过程调用”：</p>
+  <div class="flow">
+    <div class="box"><b>AIV 侧</b>把请求（做什么、参数）写进共享队列</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>AICPU 侧</b>轮询队列，取出请求</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>AICPU 执行</b>建 QP / 注册内存 / 调度通信</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>回写结果</b>把状态/地址写回共享内存</div>
+  </div>
+  <p>所以 <code class="inl">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code> 的语义是：<b>“我要用的 HCCL 服务端在 AICPU 上”</b>。kernel 里调 <code class="inl">InitV2</code> / <code class="inl">SetCcTilingV2</code> 时，实际是通过 KFC 把请求投给 AICPU，AICPU 干完活把 QP 表地址写回 op param。</p>
+  <div class="callout info">
+    <b>一句话区分</b>
+    AICPU 是“谁在建资源、维护状态”；KFC 是“AIV 怎么把请求交给 AICPU”的通道。二者是“角色”与“机制”的关系。
+  </div>
+
+  <h3>8.4 A3 上的分工</h3>
+  <table>
+    <thead><tr><th>工作</th><th>由谁做</th><th>代码证据</th></tr></thead>
+    <tbody>
+      <tr><td>建 QP、注册窗口、填内存描述表</td><td><b>AICPU</b>（HCCL 服务）</td><td><code class="inl">aiRMAInfo</code> 由 HCCL 回填</td></tr>
+      <tr><td>把 QP 表地址交出来</td><td><b>AICPU</b>，经 KFC 回写 op param</td><td><code class="inl">context_-&gt;aiRMAInfo</code></td></tr>
+      <tr><td>选目标 rank、算窗口偏移</td><td>AIV（我们的 kernel）</td><td><code class="inl">proxyRank</code>、<code class="inl">ControlLaneOffset</code></td></tr>
+      <tr><td>拼 WQE、敲 doorbell</td><td><b>AIV</b></td><td><code class="inl">PostRdmaSend</code></td></tr>
+      <tr><td>数据真正上线</td><td>网卡（RoCE）</td><td>doorbell 之后</td></tr>
+    </tbody>
+  </table>
+  <p>所以“A3 上 AIV 能发 RDMA”这句话要加限定：<b>AIV 能发 WQE，但 QP 必须由 AICPU 先建好</b>。AIV 不是独立通信实体。</p>
+
+  <h3>8.5 A5 为什么可以不要 AICPU 参与</h3>
+  <p>950 的演进方向是“把通信能力做成 AIV 可直接调用的引擎”：HCCL 提供 <code class="inl">COMM_ENGINE_AIV</code>，配套 <code class="inl">HcclChannelAcquire</code> / <code class="inl">HcclEngineCtxCreate</code> 与 hcomm 的 <code class="inl">Init/WriteNbi</code>。对 kernel 来说，通信变成了“拿句柄、调函数”，不需要理解 QP 表，也不需要 KFC 往返。</p>
+  <p>为什么 950 能做到？可以从三个层面理解：</p>
+  <ul>
+    <li><b>硬件</b>：通信引擎的暴露方式更贴近 AIV，AIV 可以直接驱动；</li>
+    <li><b>软件</b>：HCCL 把建链/注册封装进 EngineCtx，host 一次建好，device 直接用；</li>
+    <li><b>接口</b>：hcomm 把底层差异吃掉，kernel 只看到 channel 与 write。</li>
+  </ul>
+  <p>于是 A5 的代码形态完全不同：<b>不用 QP 表、不用 <code class="inl">HcclOpResParam</code>，用一份引擎上下文</b>。</p>
+
+  <h3>8.6 “A5 用 AICPU 行不行 / A3 用 AIV 行不行”</h3>
+  <table>
+    <thead><tr><th>组合</th><th>可行性</th><th>原因</th></tr></thead>
+    <tbody>
+      <tr><td>A5 + AIV 引擎</td><td><b>可行（现状）</b></td><td><code class="inl">COMM_ENGINE_AIV</code> 真实存在，hcomm 可用</td></tr>
+      <tr><td>A5 + AICPU/KFC</td><td>取决于 HCCL 版本；不是首选</td><td>950 的推荐路径是 AIV 引擎；KFC 是给老架构的兼容路径，是否保留看版本</td></tr>
+      <tr><td>A3 + AIV 引擎</td><td><b>不可行</b></td><td>实测 <code class="inl">HcclEngineCtxGet(COMM_ENGINE_AIV)</code> 返回 <code class="inl">HCCL_E_PARA(1)</code>：没有这个后端</td></tr>
+      <tr><td>A3 + AICPU/KFC</td><td><b>可行（参考实现）</b></td><td>arch22 用 <code class="inl">Hccl&lt;AICPU&gt;</code> + MC2 CC-Tiling，正常拿到 QP 表</td></tr>
+    </tbody>
+  </table>
+  <div class="callout good">
+    <b>结论</b>
+    不是“A3 天生没有 QP 表”，而是 <b>“用哪套后端”由平台 + HCCL 版本共同决定</b>。A3 的正确后端是 AICPU/KFC，A5 的正确后端是 AIV 引擎。把 A5 的调用硬搬到 A3，等于用错后端，报参数错误是必然的。
+  </div>
+
+  <h3>8.7 A3 能不能彻底绕开 AICPU</h3>
+  <p>如果只追求“数据面能通”，方案 B（窗口直写）确实绕开了 QP 表。但要注意：<b>窗口本身、remoteRes 映射仍然是 HCCL 在 AICPU 侧建好的</b>。也就是说：</p>
+  <ul>
+    <li>数据面：可以绕开 QP 表（用窗口拷贝）；</li>
+    <li>控制面：绕不开 HCCL 的资源建立，只是不经过 KFC 的“发 WQE”环节。</li>
+  </ul>
+  <p>这也是为什么方案 B 仍然要求 <code class="inl">remoteRes[rank]</code> 有效。彻底不要 HCCL 只适用于“自己写驱动 + 自己建 QP”的场景，不在算子层做。</p>
+</section>
+
+<!-- ================= 9 ================= -->
+<section id="s9">
+  <h2 class="sec"><span class="num">9</span>QP 表与一次 RDMA 写的全过程</h2>
+
+  <h3>9.1 表里有什么</h3>
+  <table>
+    <thead><tr><th>字段</th><th>含义</th><th>代码里的用法</th></tr></thead>
+    <tbody>
+      <tr><td><code class="inl">qpNum</code></td><td>到每个目的 rank 的 QP 个数</td><td>寻址步长的一部分</td></tr>
+      <tr><td><code class="inl">sqPtr</code></td><td>所有发送队列的基地址</td><td><code class="inl">sqPtr + dstRank*qpNum*sizeOfAiRMAWQ</code></td></tr>
+      <tr><td><code class="inl">sizeOfAiRMAWQ</code></td><td>单个 WQ 的字节大小</td><td>按 rank 偏移</td></tr>
+      <tr><td><code class="inl">memPtr</code></td><td>远端内存描述表基地址</td><td>取 <code class="inl">REMOTE_INPUT</code> 的 rkey</td></tr>
+      <tr><td><code class="inl">sizeOfAiRMAMem</code></td><td>单个 rank 内存描述的字节大小</td><td>按 rank 偏移</td></tr>
+      <tr><td><code class="inl">curRankId</code></td><td>本 rank</td><td>索引/调试</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.2 寻址：为什么是 <code class="inl">dstRank*qpNum*sizeOfAiRMAWQ</code></h3>
+  <p>HCCL 把所有目的 rank 的 WQ 连续排在一块 GM 里：第 0 个 rank 占 <code class="inl">qpNum</code> 个 WQ，每个 WQ 大小 <code class="inl">sizeOfAiRMAWQ</code>。所以第 dstRank 个 rank 的第一组 WQ 就在 <code class="inl">dstRank * qpNum * sizeOfAiRMAWQ</code> 处。这个布局与参考实现完全一致，说明我们的寻址假设没错。</p>
+
+  <h3>9.3 一次写的完整步骤（对应 <code class="inl">PostRdmaSend</code>）</h3>
+  <div class="flow">
+    <div class="box"><b>1. 定位 WQ</b>按 dstRank 算出 qp 指针</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>2. 读 head/tail</b>判断队列是否有空位（保留 depth-1）</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>3. 填 WQE</b>opcode/长度/rkey/远端地址/本地 SGE</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>4. 敲 doorbell</b>wqn + 低 16 位 head + sl</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>5. 回写 head</b>把新的生产者位置写回 GM</div>
+  </div>
+  <pre><span class="c">// 关键字段（省略部分）</span>
+<span class="k">auto</span> qpNum = rdmaInfo_-&gt;qpNum;
+<span class="k">auto</span> *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_-&gt;sqPtr + dstRank * qpNum * rdmaInfo_-&gt;sizeOfAiRMAWQ);
+
+<span class="c">// 等空位：head - tail &lt; depth - 1（留一个空槽区分满/空）</span>
+<span class="k">while</span> (head - *tailAddr &gt;= qp-&gt;depth - 1U) { ... }
+
+<span class="c">// WQE</span>
+*(__gm__ uint32_t *)(wqe)      = 3U | ...;          <span class="c">// opcode: RDMA Write</span>
+*(__gm__ uint32_t *)(wqe + 4U)  = bytes;             <span class="c">// 长度</span>
+*(__gm__ uint32_t *)(wqe + 20U) = remoteKey-&gt;key;    <span class="c">// 远端 rkey</span>
+*(__gm__ uint64_t *)(wqe + 24U) = (uint64_t)dst;     <span class="c">// 远端地址</span>
+...                                                  <span class="c">// SGE: 本地 lkey + 本地地址</span>
+
+<span class="c">// doorbell</span>
+uint64_t db = qp-&gt;wqn | ((head % 65536ULL) &lt;&lt; 32U) | ((uint64_t)qp-&gt;sl &lt;&lt; 48U);
+DataCopyPad(dbGm, doorbellUb, ...);                  <span class="c">// 写到 qp-&gt;dbAddr</span></pre>
+
+  <h3>9.4 为什么到处是 <code class="inl">cacheWriteThrough</code> / <code class="inl">cacheReadInvalidate</code></h3>
+  <p>AIV 访问 GM 时并不保证与其他核/网卡看到同一份缓存。WQE、head/tail、flag 都是多生产者/多消费者共享的数据，所以：</p>
+  <ul>
+    <li>写 WQE 后要 <code class="inl">cacheWriteThrough</code>，确保网卡读到的是新内容；</li>
+    <li>读 tail/flag 前要 <code class="inl">cacheReadInvalidate</code>，避免读到自己的旧缓存；</li>
+    <li>关键步骤之间加 <code class="inl">PipeBarrier&lt;PIPE_ALL&gt;</code>，防止编译器/硬件乱序。</li>
+  </ul>
+  <p>这也是方案 B 必须“payload 与 flag 分开写、分开 barrier”的原因：否则接收侧可能先看到 flag、再看到旧 payload。</p>
+
+  <h3>9.5 为什么写窗口地址也能跨机生效</h3>
+  <p><code class="inl">windowsIn</code> 不是普通 HBM 地址，而是 <b>HCCL 注册窗口的统一虚拟地址</b>。对它的访问由底层传输路由：</p>
+  <ul>
+    <li>同 server → HCCS 直接访存；</li>
+    <li>跨 server → RoCE，网卡完成封装。</li>
+  </ul>
+  <p>所以方案 B（直接 <code class="inl">DataCopy</code> 到窗口）和方案 A（发 WQE）<b>物理上都过 RoCE</b>，区别只是“谁提单”：前者由 AIV 的搬运引擎发起，后者由 AIV 驱动网卡 SQ。</p>
+</section>
+
+<!-- ================= 10 ================= -->
+<section id="s10">
+  <h2 class="sec"><span class="num">10</span>五维总结：为什么 A5 可以、A3 必须 AICPU</h2>
+
+  <h3>10.1 硬件维度</h3>
+  <p>A3 的通信控制面放在 AICPU（通用核），AIV 只做计算与搬运；A5 把通信引擎下沉到 AIV 可直接调用的位置。这不是“谁更强”，而是<b>两代芯片的通信架构不同</b>。</p>
+
+  <h3>10.2 HCCL 实现/版本维度</h3>
+  <p>A3 的 HCCL 对外暴露的是 MC2 CC-Tiling + KFC / OpResCtx；A5 暴露的是 Channel + EngineCtx（<code class="inl">COMM_ENGINE_AIV</code>）。同一份“建通信资源”的需求，两代走了不同 API。A3 上调 <code class="inl">HcclEngineCtxGet(COMM_ENGINE_AIV)</code> 返回 <code class="inl">HCCL_E_PARA</code>，是最直接的证据。</p>
+
+  <h3>10.3 资源模型维度</h3>
+  <table>
+    <thead><tr><th></th><th>A5</th><th>A3</th></tr></thead>
+    <tbody>
+      <tr><td>kernel 拿到什么</td><td>引擎上下文：channel 句柄 + ipcBuffer</td><td>op param：窗口 + <code class="inl">aiRMAInfo</code>（QP 表）</td></tr>
+      <tr><td>发送怎么做</td><td><code class="inl">WriteNbi(channel, ...)</code></td><td>自己拼 WQE + doorbell</td></tr>
+      <tr><td>谁建资源</td><td>host 调 EngineCtx/Channel</td><td>AICPU（HCCL 服务）</td></tr>
+      <tr><td>能不能不用 QP 表</td><td>本来就不用</td><td>要么拿表，要么窗口直写</td></tr>
+    </tbody>
+  </table>
+
+  <h3>10.4 kernel ABI 维度</h3>
+  <p>A5 的第一个入参是 <code class="inl">roceContext</code>（host 建好的上下文）；A3 必须靠 <code class="inl">GetHcclContext</code> 拿 op param，并调用 <code class="inl">InitV2/SetCcTilingV2</code> 完成与 AICPU 的握手。<b>入参不同、初始化不同，代码不能直接复用。</b></p>
+
+  <h3>10.5 性能与适用场景维度</h3>
+  <ul>
+    <li><b>QP 表 + WQE</b>：批量提交、乱序流水、单边写，适合大数据量；notify 这种控制面小消息用它反而“杀鸡用牛刀”，但语义最标准。</li>
+    <li><b>窗口直写</b>：实现最简单，每次一次 MTE3 搬运，适合小消息；大流量时 CPU 侧循环与 cache 维护成本高。</li>
+    <li><b>hcomm channel</b>：A5 的推荐路径，兼顾易用与性能。</li>
+  </ul>
+
+  <h3>10.6 反向问题：为什么不能“一套代码通吃”</h3>
+  <p>因为两代平台的 <b>能力集不同</b>：</p>
+  <ul>
+    <li>A3 没有 <code class="inl">COMM_ENGINE_AIV</code> 后端 → A5 路径在 A3 上第一步就失败；</li>
+    <li>A5 的推荐路径不需要 QP 表 → 硬塞 A3 的 WQE 代码没有意义；</li>
+    <li>唯一能“通吃”的是<b>窗口直写</b>，因为它只依赖窗口地址，而窗口两边都有。但它的代价是性能与 remoteRes 依赖。</li>
+  </ul>
+  <p>所以合理设计是：<b>按平台编译分支</b>（正是本仓库用 <code class="inl">__DAV_C310__</code> 做的事），A5 走 hcomm，A3 走 MC2 CC-Tiling + QP 表（主攻）或窗口直写（保底）。</p>
+</section>
+
+<!-- ================= 11 ================= -->
+<section id="s11">
+  <h2 class="sec"><span class="num">11</span>结论、改造清单与验证判据</h2>
+
+  <h3>11.1 三条路线</h3>
+  <table>
+    <thead><tr><th>路线</th><th>做法</th><th>状态</th><th>评价</th></tr></thead>
+    <tbody>
+      <tr><td>A（A5 逻辑照搬）</td><td>EngineCtx + Channel（<code class="inl">COMM_ENGINE_AIV</code>）</td><td>A3 返回 <code class="inl">HCCL_E_PARA(1)</code></td><td><b>不可行</b>，平台无此引擎</td></tr>
+      <tr><td><b>A′（正确姿势）</b></td><td>opType=18 + <code class="inl">BatchWrite=level1:hierarchy</code> + SetAicpuBlockDim + kernel <code class="inl">InitV2/SetCcTilingV2</code></td><td>代码尚未改造</td><td><b>推荐</b>，与参考实现一致，性能最优</td></tr>
+      <tr><td>B（窗口直写）</td><td><code class="inl">DirectWindowWrite()</code> + <code class="inl">CopyWindowBytes</code></td><td>已实现并推送</td><td>保底可用，语义等价，性能次要</td></tr>
+    </tbody>
+  </table>
+
+  <h3>11.2 改造清单（A′）</h3>
+  <ol>
+    <li><b>host</b>（<code class="inl">notify_dispatch_normal_layered_tiling.cc</code> 的 <code class="inl">SetComm</code>）：
+      <ul>
+        <li>opType：8 → 18；</li>
+        <li>algConfig：<code class="inl">AlltoAll=level0:fullmesh;level1:pairwise</code> → <code class="inl">BatchWrite=level1:hierarchy</code>（单机可退回 level0:fullmesh）；</li>
+        <li>去掉 <code class="inl">SetCommEngine(AIV_ENGINE)</code>（A3 分支）；</li>
+        <li>补 <code class="inl">SetAicpuBlockDim(跨机 ? 6 : 1)</code>；</li>
+        <li>检查 <code class="inl">GetTiling</code> 返回值。</li>
+      </ul>
+    </li>
+    <li><b>kernel</b>（A3 分支）：
+      <ul>
+        <li>加 <code class="inl">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code> 成员；</li>
+        <li><code class="inl">hccl_.InitV2(context, &amp;tilingData)</code>；</li>
+        <li><code class="inl">hccl_.SetCcTilingV2(offsetof(NotifyDispatchNormalLayeredTilingData, mc2CcTiling))</code>；</li>
+        <li>保持 A5 分支不变。</li>
+      </ul>
+    </li>
+    <li><b>保留方案 B 作为回退开关</b>（<code class="inl">DirectWindowWrite()</code> 已按平台返回常量，必要时改成运行时开关）。</li>
+  </ol>
+
+  <h3>11.3 验证判据</h3>
+  <table>
+    <thead><tr><th>观察点</th><th>期望</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td><code class="inl">[ln] qp dst=31 info=...</code></td><td>非 0，且 <code class="inl">num &gt; 0</code></td><td>QP 表已下发</td></tr>
+      <tr><td>stage 6 打点</td><td><code class="inl">701 → 703 → 704</code></td><td>跨机发送完成</td></tr>
+      <tr><td>stage 7 打点</td><td><code class="inl">801 → 802</code>，直到 stage 7 结束</td><td>聚合不再互等</td></tr>
+      <tr><td>进程退出</td><td>正常结束、结果校验通过</td><td>端到端打通</td></tr>
+    </tbody>
+  </table>
+
+  <h3>11.4 日志怎么读</h3>
+  <ul>
+    <li><code class="inl">[ln]</code>：kernel printf。每个核有独立小缓冲，<b>保留尾部、丢弃头部</b>，所以关键看“最后一行”而不是“第一行”。</li>
+    <li><code class="inl">[ln-host]</code>：host 侧 trace，双写 stderr 与 <code class="inl">/tmp/deepep_layered_host.log</code>。</li>
+    <li><code class="inl">scripts/run_a3_layered.sh</code> 把完整输出重定向到 <code class="inl">logs/a3-&lt;时间&gt;-rank&lt;N&gt;.log</code>，终端只回显白名单行；排查时要直接看文件，不要只看终端。</li>
+    <li><code class="inl">step=</code> 标签：定位异常发生在 host 建上下文的哪一步（<code class="inl">engine-get</code> 就是取引擎上下文）。</li>
+  </ul>
+
+  <div class="callout good">
+    <b>一句话总结</b>
+    A3 拿不到 QP 表，不是平台没有这个能力，而是我们的算子<b>没有通过 MC2 的 CC-Tiling 把“我要用 BatchWrite + hierarchy”告诉 HCCL</b>；HCCL 因此没有准备 QP，<code class="inl">aiRMAInfo</code> 自然为 0。把 host 三项与 kernel 两句补齐，方案 A′ 即可打通；在此之前，方案 B 是可靠的保底。
+  </div>
+</section>
+
+<footer>
+  文档基于本仓库 <code class="inl">csrc/deepep</code> 实现与 <code class="inl">ops-transformer</code> arch22 参考代码整理 ｜ 分支 readme
+</footer>
+
+</div>
+</body>
+</html>
