@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月度工作总结 · 2026 年 11 月</title>
+<style>
+  :root{
+    --bg:#f5f6fa; --panel:#fff; --ink:#1b2230; --ink2:#4b5668; --ink3:#7a8699;
+    --line:#e4e8f0; --brand:#1d4ed8; --brand2:#0e7490; --ok:#067647; --warn:#b42318;
+    --accent:#eef3ff;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); font-size:15.5px; line-height:1.8;
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  }
+  .page{max-width:1000px; margin:0 auto; padding:0 30px 90px;}
+  header{
+    background:linear-gradient(135deg,#0b1220 0%,#152a4d 60%,#0e3b52 100%);
+    color:#eaf1ff; padding:54px 30px 46px; border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  header .in{max-width:1000px; margin:0 auto;}
+  .eyebrow{font-size:12.5px; letter-spacing:.18em; text-transform:uppercase; color:#7fb3ff; margin-bottom:12px;}
+  h1{margin:0 0 10px; font-size:30px; font-weight:650; letter-spacing:.5px;}
+  .sub{color:#a9bcd8; font-size:14.8px; max-width:760px; margin:0;}
+  .meta{display:flex; flex-wrap:wrap; gap:10px; margin-top:22px;}
+  .meta span{font-size:12.5px; color:#c8d8f0; background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.14); padding:4px 11px; border-radius:999px;}
+  h2{font-size:21px; margin:46px 0 6px; padding-left:12px; border-left:4px solid var(--brand); letter-spacing:.3px;}
+  h2 .num{color:var(--brand); font-weight:700; margin-right:6px;}
+  h3{font-size:16.5px; margin:26px 0 10px;}
+  h4{font-size:14.5px; margin:16px 0 6px; color:var(--ink2);}
+  p{margin:9px 0;}
+  ul,ol{margin:9px 0 9px 22px; padding:0;}
+  li{margin:5px 0;}
+  code{background:#eef2f8; color:#123; padding:1px 6px; border-radius:5px; font-size:12.8px;}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin:20px 0 6px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04);}
+  .card .tag{font-size:11.5px; letter-spacing:.08em; color:var(--ink3); text-transform:uppercase;}
+  .card .v{font-size:15px; font-weight:650; margin:6px 0 4px;}
+  .card .d{font-size:13.5px; color:var(--ink2); margin:0;}
+  .card.b{border-left:4px solid var(--brand);}
+  .card.g{border-left:4px solid var(--ok);}
+  .card.w{border-left:4px solid var(--warn);}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; overflow:hidden;}
+  th,td{padding:10px 13px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top;}
+  th{background:#f0f4fb; font-size:13.5px; font-weight:600; color:#22304a;}
+  tr:last-child td{border-bottom:none;}
+  .note{background:var(--accent); border:1px solid #d6e2ff; border-left:4px solid var(--brand);
+    border-radius:10px; padding:14px 16px; margin:16px 0; font-size:14px;}
+  .ok{background:#f2fbf6; border:1px solid #cdeeda; border-left:4px solid var(--ok);
+    border-radius:10px; padding:14px 16px; margin:16px 0; font-size:14px;}
+  .step{border-left:3px solid #cfd8e6; margin:0 0 0 8px; padding:0 0 2px 20px;}
+  .step .t{font-weight:650; color:#111a2b;}
+  .step p{margin:4px 0 12px;}
+  .quote{color:var(--ink2); font-size:14.3px;}
+  footer{margin-top:54px; padding-top:18px; border-top:1px solid var(--line); color:var(--ink3); font-size:13px;}
+  @media print{
+    body{background:#fff;}
+    header{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+    .page{padding-bottom:20px;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="in">
+    <div class="eyebrow">Monthly Review · 2026.11</div>
+    <h1>月度工作总结</h1>
+    <p class="sub">本月主要投入 A3 双机分层通信（layered dispatch）的问题定位与方案落地，同步推进测试代码补充与个人学习认证。</p>
+    <div class="meta">
+      <span>汇报人：（待填）</span>
+      <span>时间范围：2026 年 11 月</span>
+      <span>方向：昇腾 DeepEP / A3 分层通信</span>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+
+  <div class="cards">
+    <div class="card b"><div class="tag">核心事项</div><div class="v">A3 分层通信挂死</div><p class="d">完成根因定位并落地替代方案</p></div>
+    <div class="card b"><div class="tag">代码产出</div><div class="v">A3 分测代码</div><p class="d">双机测试脚本与验证用例补齐</p></div>
+    <div class="card g"><div class="tag">学习认证</div><div class="v">4 项全部完成</div><p class="d">可信考试 · 三营培训 · 昇腾认证 · 前置课程</p></div>
+    <div class="card w"><div class="tag">待推进</div><div class="v">性能验证</div><p class="d">当前仅完成功能验证，性能待量化</p></div>
+  </div>
+
+  <h2><span class="num">一、</span>本月内容完成情况</h2>
+
+  <h3>1. A3 双机分层通信挂死问题：从定位到解决</h3>
+
+  <h4>问题现象</h4>
+  <p>A3 双机 32 卡运行 layered dispatch 时，notify 算子在 stage 6/7 挂死：主节点 AIV0 能走完 <code>701→703→704→702→stage7</code>，AIV1 只到 <code>701</code>；从节点现象相反；其余核卡在 <code>StageBoundary(7)</code> 的 <code>SyncAll</code>，双机互等。</p>
+
+  <h4>定位过程</h4>
+  <div class="step">
+    <div class="t">① 建立可观测性</div>
+    <p>在 14 个阶段埋入 <code>TracePoint</code>（<code>stage*100+step</code> 编码），增加按核过滤（仅 AIV0/AIV1）、窗口关系快照，以及“零解引用”的 QP 探针，避免探针本身空指针 trap。</p>
+  </div>
+  <div class="step">
+    <div class="t">② 排除误判</div>
+    <p>初期“某些关键点不打印”被证实是 kernel printf 每核缓冲保尾丢头、以及落盘非时间序，而非代码未执行，避免了错误方向。</p>
+  </div>
+  <div class="step">
+    <div class="t">③ 锁定直接原因</div>
+    <p>日志显示窗口侧完全正常（<code>ctx peer win=0x80000000</code>），唯一缺口是 <code>aiRMAInfo = 0</code>——MC2 算子 op param 里没有 AI-RMA 的 QP 表。跨节点发送核在 <code>PostRdmaSend</code> 第一句 <code>rdmaInfo_-&gt;qpNum</code> 处空指针退出。</p>
+  </div>
+  <div class="step">
+    <div class="t">④ 追到下发点</div>
+    <p>QP 表并非仓库代码写入，而是 HCCL 在 AIV 引擎上下文建立后填充。按 A5 相同逻辑在 A3 执行后，<code>HcclEngineCtxGet(..., COMM_ENGINE_AIV, ...)</code> 返回 <code>HCCL_E_PARA(1)</code>，确认 A3(910_93) 的 HCCL 不提供该引擎，无法下发 QP 表。</p>
+  </div>
+
+  <h4>解决方案</h4>
+  <table>
+    <thead><tr><th style="width:22%">方面</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>思路</td><td>不再让 AIV 核拼 RoCE WQE，改为直接写 <code>WindowIn(peer)</code> 窗口地址 + flag（方案 B）</td></tr>
+      <tr><td>改动</td><td>stage 6 与 stage 12 的 4 处跨节点发送点；接收侧 <code>Wait(flag)</code> + <code>cacheReadInvalidate</code> 零改动</td></tr>
+      <tr><td>兼容</td><td>A5 路径完全不受影响；保留开关，未来 A3 支持 AIV 引擎时可低成本切回</td></tr>
+      <tr><td>文档</td><td>结论整理为技术说明，推送至 <code>readme</code> 分支供评审</td></tr>
+    </tbody>
+  </table>
+  <div class="note">方案 B 保持算法与通信拓扑不变：14 个阶段、本地聚合（stage 7）、server 内扇出、ack 回传全部保留，只替换“最后一公里”的搬运指令。</div>
+
+  <h3>2. A3 分层通信新增测试代码（本月完成）</h3>
+  <p>围绕 A3 双机 layered 场景补齐跨机测试脚本与验证用例，支持两机分角色启动、日志分节点落盘、关键打点自动提取，使问题复现与回归从“手工拼命令”变为可重复执行。</p>
+
+  <h3>3. 学习与认证</h3>
+  <table>
+    <thead><tr><th style="width:52%">事项</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td>可信考试（工作级）</td><td>已完成</td></tr>
+      <tr><td>三营培训</td><td>已完成</td></tr>
+      <tr><td>昇腾认证</td><td>已完成</td></tr>
+      <tr><td>新员工之家前置课程</td><td>已完成</td></tr>
+    </tbody>
+  </table>
+
+  <h2><span class="num">二、</span>个人成长机会</h2>
+  <ol>
+    <li><b>调试方法论升级</b>：从“看日志猜原因”转向“提出可验证假设 → 最小插桩 → 二分定位”。本次把失败步骤写进异常消息（<code>step=...</code>），一次就锁定了 HCCL 调用位置。</li>
+    <li><b>通信机制理解</b>：理清 HCCL 两条数据面路径（AIV 直接提单 vs 窗口地址写），理解了“地址即通信语义”的设计，而不只是会改一处代码。</li>
+    <li><b>跨平台差异意识</b>：不再假设“A5 能跑的 A3 也能跑”，先建立平台能力矩阵、再用最小实验验证边界。</li>
+    <li><b>工程表达</b>：把技术结论组织成可评审文档（现状、根因、方案对比、代价与回退），提升汇报与横向协作效率。</li>
+  </ol>
+  <div class="note">
+    <b>待提升：</b>底层源码不可见，部分结论依赖实测推断；当前仅完成功能验证，性能（直写 vs 单边写）尚未量化；对 A5 全链路掌握仍偏浅。
+  </div>
+
+  <h2><span class="num">三、</span>周边资源</h2>
+  <ul>
+    <li><b>平台与环境</b>：双机 32 卡真实环境与脚本化重编重跑流程，是本次定位的前提。</li>
+    <li><b>代码参照</b>：仓库既有 A3 非分层实现（dispatch/combine v2 系列）为“窗口直写”提供同源佐证，避免从零摸索。</li>
+    <li><b>接口文档</b>：CANN/HCCL 返回码语义（<code>HCCL_E_PARA</code> 与 <code>HCCL_E_NOT_FOUND</code> 的差异）是判定“平台不支持”而非“未初始化”的关键依据。</li>
+    <li><b>人与组织</b>：同事在 HCCL 机制上的答疑；培训与认证体系提供的系统化输入。</li>
+    <li><b>不足</b>：底层实现细节缺少可查资料，个别结论只能靠实验反推，后续需更主动积累经验知识库。</li>
+  </ul>
+
+  <h2><span class="num">四、</span>心得体会</h2>
+
+  <h4>1. 现象不等于原因</h4>
+  <p class="quote">前期最大的弯路，是把“日志没打出来”当成“代码没执行”，实际是 printf 缓冲与落盘顺序问题。先分清“没执行 / 没打印 / 打丢了”，才能不误判。</p>
+
+  <h4>2. 先定位层级，再动代码</h4>
+  <p class="quote">问题可能出在 kernel、host 或平台能力三层。本次在 host 侧用一条 <code>step=</code> 就证明了是平台能力缺失，避免了在 kernel 里做无效改造。</p>
+
+  <h4>3. 尽早验证能力边界</h4>
+  <p class="quote">一个 API 的返回码可以省下几天的试错。遇到“上游应该会给我们数据”的假设，应第一时间用最小实验证伪或证实。</p>
+
+  <h4>4. 改动要留可回退开关</h4>
+  <p class="quote">方案 B 把差异收敛到 <code>DirectWindowWrite()</code> 一个判断，既保住 A5 原有路径，也让未来平台能力补齐后能低成本切回。</p>
+
+  <h4>5. 文档化是能力的放大器</h4>
+  <p class="quote">把定位过程、方案取舍与代价写清楚，不仅方便汇报，也让同类问题下次能直接复用结论，而不是重新踩一遍。</p>
+
+  <div class="ok">
+    <b>下月计划：</b>完成方案 B 的双机功能回归；补充跨节点窗口直写的性能对比数据；继续跟进 CANN 在 A3 上对 AIV 引擎的支持情况。
+  </div>
+
+  <footer>月度工作总结 · 2026 年 11 月 · 昇腾 DeepEP</footer>
+
+</div>
+</body>
+</html>
