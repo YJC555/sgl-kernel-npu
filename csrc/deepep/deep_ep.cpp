@@ -126,9 +126,11 @@ Buffer::Buffer(int64_t rank, int64_t num_ranks, int64_t num_nvl_bytes, int64_t n
 #if DEEPEP_CANN_VERSION_NUM >= DEEPEP_LAYERED_MIN_CANN_VERSION
     // The layered A5 data plane runs over hcomm channels and needs this AIV
     // engine context on the communication domain the ops are bound to.
-    // A3 (910_93) cannot create it: HcclEngineCtxGet(COMM_ENGINE_AIV) returns
-    // HCCL_E_PARA there, so HCCL never publishes an AI-RMA QP table.  The A3
-    // kernel writes the peer windows directly instead and ignores roceContext.
+    // A3 (910_93) has no COMM_ENGINE_AIV backend (HcclEngineCtxGet returns
+    // HCCL_E_PARA), so it takes the MC2 CC-tiling path instead: host declares
+    // BatchWrite and the kernel calls Hccl<AICPU>::InitV2/SetCcTilingV2, which
+    // makes HCCL publish the AI-RMA QP table.  That path needs no engine
+    // context, so this block stays A5-only.
     const bool layeredEngineSoc = soc_version == op::SocVersion::ASCEND950;
     if (layered_mode && layeredEngineSoc) {
         HcclComm layeredComm = ep_comm;

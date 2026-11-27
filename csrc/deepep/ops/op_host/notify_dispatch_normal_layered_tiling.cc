@@ -74,12 +74,25 @@ bool ValidPlanLayout(const CamMoeLayered::PlanLayout &p, uint64_t packetSlots, u
            p.packetDesc <= p.memberDesc && p.memberDesc <= p.sourceReturnBase && p.reverseMember <= p.total &&
            static_cast<uint64_t>(p.packetSlot) + packetSlots <= planElements;
 }
-void SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g)
+void SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g, bool crossServer)
 {
+#ifdef __DAV_C310__
+    (void)crossServer;
+    // A5 (950): HCCL exposes the AIV communication engine, so the op keeps the
+    // AlltoAll declaration and never needs an AI-RMA QP table.
     AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
     c.GetTiling(d->mc2InitTiling);
     c.GetTiling(d->mc2CcTiling);
+#else
+    // A3 (910_93): HCCL only publishes the AI-RMA QP table (aiRMAInfo) for a
+    // single-sided batch write. Layered links just the same-slot card on the
+    // peer server, so the inter-server level must be hierarchy.
+    const std::string algConfig = crossServer ? "BatchWrite=level1:hierarchy" : "BatchWrite=level0:fullmesh";
+    AscendC::Mc2CcTilingConfig c(g, 18U, algConfig);
+    c.GetTiling(d->mc2InitTiling);
+    c.GetTiling(d->mc2CcTiling);
+#endif
 }
 }  // namespace
 namespace optiling {
@@ -284,7 +297,12 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
                         l.totalUbSize < REQUIRED_NOTIFY_UB_BYTES,
                     OP_LOGE(n, "normal layered workspace or UB budget is invalid"), return GRAPH_FAILED);
     ws[0] = CamMoeLayered::AlignUp64(counterBytes);
-    SetComm(d, std::string(g));
+    SetComm(d, std::string(g), servers > 1U);
+#ifndef __DAV_C310__
+    // A3 keeps the communication control plane on AICPU. Cross-server needs the
+    // full AICPU service block set; a single server only needs one block.
+    c->SetAicpuBlockDim(servers > 1U ? mc2tiling::AICPU_NUM_BLOCKS_A2 : 1U);
+#endif
     c->SetBlockDim(l.aivNum);
     c->SetScheduleMode(1);
     c->SetTilingKey(23U);
