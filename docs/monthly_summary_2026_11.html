@@ -84,7 +84,7 @@
 
   <div class="cards">
     <div class="card b"><div class="tag">核心事项</div><div class="v">A3 分层通信挂死</div><p class="d">完成根因定位并落地替代方案</p></div>
-    <div class="card b"><div class="tag">代码产出</div><div class="v">A3 分测代码</div><p class="d">双机测试脚本与验证用例补齐</p></div>
+    <div class="card b"><div class="tag">代码产出</div><div class="v">test_internode_a3.py</div><p class="d">A3 双机测试用例与日志落盘体系</p></div>
     <div class="card g"><div class="tag">学习认证</div><div class="v">4 项全部完成</div><p class="d">可信考试 · 三营培训 · 昇腾认证 · 前置课程</p></div>
     <div class="card w"><div class="tag">待推进</div><div class="v">性能验证</div><p class="d">当前仅完成功能验证，性能待量化</p></div>
   </div>
@@ -126,8 +126,15 @@
   </table>
   <div class="note">方案 B 保持算法与通信拓扑不变：14 个阶段、本地聚合（stage 7）、server 内扇出、ack 回传全部保留，只替换“最后一公里”的搬运指令。</div>
 
-  <h3>2. A3 分层通信新增测试代码（本月完成）</h3>
-  <p>围绕 A3 双机 layered 场景补齐跨机测试脚本与验证用例，支持两机分角色启动、日志分节点落盘、关键打点自动提取，使问题复现与回归从“手工拼命令”变为可重复执行。</p>
+  <h3>2. A3 双机层间通信测试 <code>test_internode_a3.py</code>（本月完成）</h3>
+  <p>本月完成 <code>tests/python/deepep/test_internode_a3.py</code> 的编写与联调，作为 A3 双机 layered 场景的验证入口：</p>
+  <ul>
+    <li><b>多进程双机启动</b>：<code>test_loop</code> 按 <code>--num-processes</code> 拉起本地 rank，配合 <code>RANK0_IP</code> 组网，支持两台机器分角色执行；</li>
+    <li><b>三类用例</b>：<code>test_diagnose</code>（分阶段诊断通信路径）、<code>test_correctness</code>（分发/合并结果正确性）、<code>test_tuning</code>（规模与参数调优）；</li>
+    <li><b>可观测性</b>：<code>log_rank</code> 统一各 rank 打印格式，<code>--log-file</code> 将输出按进程落盘，便于按节点定位问题；</li>
+    <li><b>参数化</b>：tokens、hidden、topk、专家数及 layered 相关开关均由命令行传入，复现问题无需改代码。</li>
+  </ul>
+  <p>本轮 stage 6/7 挂死问题的复现与修复验证，均以该测试为基准，对比改造前后的打点与结果。</p>
 
   <h3>3. 学习与认证</h3>
   <table>
