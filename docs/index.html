@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文档目录 · A3 分层通信与 notify 算子</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --card:#ffffff; --text:#1f2328; --muted:#59636e;
+    --border:#d8dee4; --accent:#1f6feb; --accent-soft:#ddf4ff;
+    --green:#1a7f37; --green-soft:#dafbe1;
+    --orange:#9a6700; --orange-soft:#fff8c5;
+    --gray:#6e7781; --gray-soft:#eaeef2;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:40px 20px 64px; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;
+    line-height:1.65; font-size:15px;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header{margin-bottom:28px}
+  h1{font-size:30px;line-height:1.3;margin:0 0 10px;letter-spacing:-.3px}
+  .sub{color:var(--muted);font-size:15px;margin:0 0 16px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--muted)}
+  .meta span{background:var(--card);border:1px solid var(--border);border-radius:999px;padding:3px 12px}
+  .note{
+    background:var(--accent-soft); border:1px solid #b6e3ff; border-radius:10px;
+    padding:14px 18px; font-size:14px; margin:22px 0 30px;
+  }
+  .note b{color:var(--accent)}
+  h2{font-size:19px;margin:34px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h2 .count{font-size:13px;font-weight:400;color:var(--muted);margin-left:8px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:18px 20px; display:flex; flex-direction:column; gap:8px;
+    transition:box-shadow .15s ease, transform .15s ease;
+  }
+  .card:hover{box-shadow:0 6px 20px rgba(31,35,40,.08); transform:translateY(-2px)}
+  .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .card a{font-size:16px;font-weight:600;color:var(--accent);text-decoration:none;word-break:break-all}
+  .card a:hover{text-decoration:underline}
+  .file{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;color:var(--muted)}
+  .desc{margin:0;font-size:14px;color:var(--text)}
+  .who{font-size:13px;color:var(--muted);margin:0}
+  .who b{color:var(--text);font-weight:600}
+  .badge{
+    flex:none;font-size:12px;padding:2px 9px;border-radius:999px;
+    border:1px solid transparent;white-space:nowrap;
+  }
+  .b-now{background:var(--green-soft);color:var(--green);border-color:#aceebb}
+  .b-hist{background:var(--orange-soft);color:var(--orange);border-color:#f2d97a}
+  .b-ref{background:var(--gray-soft);color:var(--gray);border-color:var(--border)}
+  .order{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:18px 22px;margin:0;
+  }
+  .order ol{margin:0;padding-left:22px}
+  .order li{margin:6px 0;font-size:14px}
+  .order code{background:var(--gray-soft);padding:1px 6px;border-radius:5px;font-size:12.5px}
+  footer{margin-top:42px;font-size:13px;color:var(--muted);text-align:center}
+  @media (max-width:520px){
+    body{padding:24px 14px 48px}
+    h1{font-size:24px}
+    .grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>文档目录：A3 分层通信与 notify 算子</h1>
+  <p class="sub">本目录汇总 <code>readme</code> 分支上的全部 HTML 文档，说明每篇讲什么、解决什么问题、适合什么时候读。</p>
+  <div class="meta">
+    <span>分支：readme</span>
+    <span>最后整理：2026-11-28</span>
+    <span>共 7 篇</span>
+  </div>
+</header>
+
+<div class="note">
+  <b>阅读提示：</b>这些文档覆盖了从“第一版跑不通”到“按 arch22 改造拿 QP 表”的完整过程。带
+  <span class="badge b-now">当前</span> 标记的与现有代码一致；带
+  <span class="badge b-hist">历史</span> 标记的记录的是已经放弃或被替换的方案，保留是为了说明“为什么当时会那么做”。
+</div>
+
+<h2>主线：问题定位与改造 <span class="count">2 篇</span></h2>
+<div class="grid">
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="a3_qp_table_migration.html">A3 分层 notify：按 arch22 改造获取 AI-RMA QP 表</a>
+        <div class="file">a3_qp_table_migration.html</div>
+      </div>
+      <span class="badge b-now">当前</span>
+    </div>
+    <p class="desc">本次改造主文档。按执行顺序讲清：改动前 host tiling / kernel 入口 / 发送分支分别是什么样、缺哪三件事；arch22 在 A3 上是如何声明 BatchWrite、设置 AicpuBlockDim、用 InitV2 + SetCcTilingV2 拿到 <code>aiRMAInfo</code> 的；我们逐处怎么仿照；以及改后为什么能形成“声明 → 建资源 → 登记 → 回填 → 发送”的闭环。</p>
+    <p class="who"><b>适合：</b>想弄清这次到底改了哪几行、每行出处在哪里时读。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="a3_a5_layered_mc2_deep_dive.html">A3/A5 分层通信与 MC2 通信下发机制详解</a>
+        <div class="file">a3_a5_layered_mc2_deep_dive.html</div>
+      </div>
+      <span class="badge b-now">当前</span>
+    </div>
+    <p class="desc">体系化长文。从名词速查（AI Core / AIV / AICPU、HCCS / RoCE、QP / WQE / doorbell、window / fullmesh / hierarchy）讲到 tiling 阶段、host 到 device 全链路、A5 的 hcomm 路径、A3 的两次尝试、arch22 参考实现、两份实现的逐项差异表、AICPU 为什么必须存在，以及一次 RDMA 写的字段走向。</p>
+    <p class="who"><b>适合：</b>第一次接触 tiling 和 MC2，需要把术语和整体架构一次补齐时读。</p>
+  </div>
+
+</div>
+
+<h2>代码讲解 <span class="count">2 篇</span></h2>
+<div class="grid">
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="notify_dispatch_normal_layered_kernel_explained.html">notify_dispatch_normal_layered.cpp 逐段详解</a>
+        <div class="file">notify_dispatch_normal_layered_kernel_explained.html</div>
+      </div>
+      <span class="badge b-ref">代码参考</span>
+    </div>
+    <p class="desc">按行号逐段拆解 kernel 文件：文件结构地图、常量与静态断言、入口函数与 UB 布局、Init 如何把参数变成状态、各 stage 在做什么。适合对照源码阅读，定位某个变量或某段逻辑。</p>
+    <p class="who"><b>适合：</b>已经了解背景，需要精读实现细节时读。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="project_structure_explained.html">sgl-kernel-npu 项目结构通俗解析</a>
+        <div class="file">project_structure_explained.html</div>
+      </div>
+      <span class="badge b-ref">基础</span>
+    </div>
+    <p class="desc">讲清这个仓库到底在做什么、目录如何划分、DeepEP / MC2 / 算子注册与编译产物之间的关系。不含具体 bug 分析，是读其他文档前的地形图。</p>
+    <p class="who"><b>适合：</b>刚接手仓库、还分不清各目录职责时先读。</p>
+  </div>
+
+</div>
+
+<h2>复盘与总结 <span class="count">3 篇</span></h2>
+<div class="grid">
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="notify_dispatch_normal_layered_507035.html">事故复盘：NotifyDispatchNormalLayered 507035（AICore UB 标量访问越界）</a>
+        <div class="file">notify_dispatch_normal_layered_507035.html</div>
+      </div>
+      <span class="badge b-ref">复盘</span>
+    </div>
+    <p class="desc">一次独立的线上问题复盘：一个输出参数的位置写错，如何一步步演变成 UB 标量访问越界，为什么错误码固定是 507035、PC 固定，以及其他排查角度。展示的是“从错误码反推根因”的方法。</p>
+    <p class="who"><b>适合：</b>想学习如何根据错误码和 PC 定位 kernel 问题时读。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="a3_layered_plan_b_window_write.html">A3 分层通信：方案 A vs 方案 B（窗口直写）</a>
+        <div class="file">a3_layered_plan_b_window_write.html</div>
+      </div>
+      <span class="badge b-hist">历史</span>
+    </div>
+    <p class="desc">记录当时的备选路线：方案 A（AI-RMA QP 表发送）与方案 B（直接写对端窗口）。解释了为什么 A5 能创建 QP、A3 当时不能，以及窗口直写为什么跨机仍然可行（跨节点依旧走 RoCE，由 HCCL 路由）。</p>
+    <p class="who"><b>适合：</b>理解“为什么曾经选择窗口直写、后来又放弃”的来龙去脉。方案 B 代码已在提交 <code>17fcc66</code> 移除。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="monthly_summary_2026_11.html">月度工作总结 · 2026 年 11 月</a>
+        <div class="file">monthly_summary_2026_11.html</div>
+      </div>
+      <span class="badge b-ref">总结</span>
+    </div>
+    <p class="desc">从本月完成情况、个人成长机会、周边资源、心得体会四个角度做的月度总结，包含 A3 分层通信测试代码、可信考试、三营培训、昇腾认证、新员工前置课程等内容。</p>
+    <p class="who"><b>适合：</b>汇报、复盘个人工作节奏时读。</p>
+  </div>
+
+</div>
+
+<h2>建议阅读顺序</h2>
+<div class="order">
+  <ol>
+    <li>先读 <code>project_structure_explained.html</code>，建立仓库地形图。</li>
+    <li>再读 <code>a3_a5_layered_mc2_deep_dive.html</code> 第 0、2 章，把名词和 tiling 补齐。</li>
+    <li>然后读 <code>a3_qp_table_migration.html</code>，对照当前代码看这次改了什么、为什么这样改。</li>
+    <li>需要精读实现时查 <code>notify_dispatch_normal_layered_kernel_explained.html</code>。</li>
+    <li><code>a3_layered_plan_b_window_write.html</code> 只在想了解历史方案时读。</li>
+    <li><code>notify_dispatch_normal_layered_507035.html</code> 作为错误码定位方法的补充案例。</li>
+    <li><code>monthly_summary_2026_11.html</code> 与本目录主题弱相关，属工作记录。</li>
+  </ol>
+</div>
+
+<footer>readme 分支 · docs/index.html · 内容随文档增删同步更新</footer>
+
+</div>
+</body>
+</html>
