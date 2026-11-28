@@ -33,11 +33,6 @@ public:
         context_ = (__gm__ HcclOpParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
 #ifndef __DAV_C310__  // A3 AiRMA transport
         rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
-        // HCCL publishes the QP table only after the op opts into MC2
-        // CC-tiling (InitV2 + SetCcTilingV2) with a BatchWrite declaration.
-        // Ops that have not been migrated yet see aiRMAInfo == 0 and fall back
-        // to the peer-window copy path instead of dereferencing null.
-        directWindowWrite_ = (rdmaInfo_ == nullptr || rdmaInfo_->qpNum == 0U);
         (void)roceContext;
 #else  // A5 Hcomm transport
         rdmaContext_ = (__gm__ CamMoeLayeredCommContext *)roceContext;
@@ -91,19 +86,6 @@ public:
     __aicore__ inline uint64_t WinSizeBytes() const
     {
         return GetWinSize(context_);
-    }
-    // A3 (910_93) uses the AI-RMA QP table when HCCL published one, i.e. when
-    // the op declared BatchWrite and ran InitV2 + SetCcTilingV2.  Only when
-    // that table is missing do we fall back to a plain copy into the peer
-    // window (still HCCS/RoCE routed by the registered window).  A5 always
-    // uses the hcomm channels.
-    __aicore__ inline bool DirectWindowWrite() const
-    {
-#ifdef __DAV_C310__
-        return false;
-#else
-        return directWindowWrite_;
-#endif
     }
     // Debug helper: snapshot of a peer relation resource with a null guard, so a
     // missing remote entry reports 0 instead of faulting on the dereference.
@@ -306,7 +288,6 @@ private:
     bool hcommInitOk_{false};
 #else
     __gm__ HcclAiRMAInfo *rdmaInfo_{nullptr};
-    bool directWindowWrite_{true};
 #endif
     uint32_t rankId_{0};
 };
