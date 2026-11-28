@@ -14,12 +14,6 @@ namespace CamMoeLayered {
 
 using namespace AscendC;
 
-#ifndef __DAV_C310__
-// A3 MC2 op domain is driven by the AICPU/KFC server, whose launch context is
-// HcclA2CombineOpParam and whose window/rank getters live on Hccl<AICPU>.
-using AicpuHccl = Hccl<HCCL_SERVER_TYPE_AICPU>;
-#endif
-
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()
 {
@@ -37,21 +31,13 @@ public:
         rankId_ = rankId;
         (void)isHybridDeployment;
         context_ = (__gm__ HcclOpParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-#ifndef __DAV_C310__  // A3 AiRMA transport
-        if (context_ == nullptr) {
-            return;
-        }
-        // BindAicpuHccl() was called by the kernel entry right after
-        // Hccl<AICPU>::InitV2/SetCcTilingV2. In that mode HCCL hands over
-        // HcclA2CombineOpParam, whose aiRMAInfo is filled once the AICPU
-        // control plane has processed the CC tiling.
-        aicpuDomain_ = (aicpuHccl_ != nullptr);
-        if (aicpuDomain_) {
-            a2Context_ = (__gm__ HcclA2CombineOpParam *)context_;
-            rdmaInfo_ = (__gm__ HcclAiRMAInfo *)a2Context_->aiRMAInfo;
-        } else {
-            rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
-        }
+#ifndef __DAV_C310__  // A3 transport
+        // The launch context is HcclOpResParam and the peer windows come from
+        // its relation table (`remoteRes[rank].nextDevicePtr->windowsIn`), same
+        // as ops/op_kernel/notify_dispatch.h. HCCL never publishes an AI-RMA QP
+        // table for an AlltoAll MC2 op on 910_93, so the data plane uses direct
+        // window writes.
+        rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
         (void)roceContext;
 #else  // A5 Hcomm transport
         rdmaContext_ = (__gm__ CamMoeLayeredCommContext *)roceContext;
@@ -63,26 +49,12 @@ public:
 #endif
     }
 
-#ifndef __DAV_C310__
-    // A3 only: the entry owns the Hccl<AICPU> object (it needs the tiling data
-    // for InitV2), the adapter keeps a pointer for window lookups.
-    __aicore__ inline void BindAicpuHccl(AicpuHccl *hccl)
-    {
-        aicpuHccl_ = hccl;
-    }
-#endif
-
     __aicore__ inline uint32_t RankId() const
     {
         return rankId_;
     }
     __aicore__ inline uint32_t RankSize() const
     {
-#ifndef __DAV_C310__
-        if (aicpuDomain_) {
-            return a2Context_->rankNum;
-        }
-#endif
         return GetRankDim(context_);
     }
     __aicore__ inline uint64_t RegisteredWindowBytes() const
@@ -98,9 +70,6 @@ public:
 #ifdef __DAV_C310__
         return (GM_ADDR)rdmaContext_->ipcBuffer[rank];
 #else
-        if (aicpuDomain_) {
-            return (GM_ADDR)aicpuHccl_->GetWindowsInAddr(rank);
-        }
         return GetBaseWindAddrByRankId(context_, rank, rankId_);
 #endif
     }
@@ -113,9 +82,6 @@ public:
 #ifdef __DAV_C310__
         return WindowIn(rank);
 #else
-        if (aicpuDomain_) {
-            return (GM_ADDR)aicpuHccl_->GetWindowsOutAddr(rank);
-        }
         if (rank == rankId_) {
             return (GM_ADDR)context_->localWindowsOut;
         }
@@ -125,23 +91,27 @@ public:
     }
     __aicore__ inline uint64_t WinSizeBytes() const
     {
-#ifndef __DAV_C310__
-        if (aicpuDomain_) {
-            return static_cast<uint64_t>(a2Context_->winSize);
-        }
-#endif
         return GetWinSize(context_);
+    }
+    // A3 (910_93) never receives an AI-RMA QP table: HCCL answers
+    // HcclEngineCtxGet(COMM_ENGINE_AIV) with HCCL_E_PARA there and only builds
+    // the QP table for a BatchWrite declaration, which this chip rejects in
+    // HcclAllocComResourceBytiling. Peer windows are still mapped GM addresses,
+    // so every "send" becomes a plain copy into the peer window. A5 keeps using
+    // the hcomm channels.
+    __aicore__ inline bool DirectWindowWrite() const
+    {
+#ifdef __DAV_C310__
+        return false;
+#else
+        return true;
+#endif
     }
     // Debug helper: snapshot of a peer relation resource with a null guard, so a
     // missing remote entry reports 0 instead of faulting on the dereference.
     __aicore__ inline void LoadPeerWindow(uint32_t rank, uint64_t &nextDevPtr, uint64_t &windowIn) const
     {
 #ifndef __DAV_C310__
-        if (aicpuDomain_) {
-            nextDevPtr = 0U;
-            windowIn = reinterpret_cast<uint64_t>(aicpuHccl_->GetWindowsInAddr(rank));
-            return;
-        }
         nextDevPtr = reinterpret_cast<uint64_t>(context_->remoteRes[rank].nextDevicePtr);
         windowIn = 0U;
         if (nextDevPtr != 0U) {
@@ -279,13 +249,12 @@ public:
     }
 
     // Debug helper: raw binding of the HCCL context that carries the AiRMA
-    // table, read without dereferencing a null context. On 910_93 the domain is
-    // AICPU/KFC, so the descriptor comes from HcclA2CombineOpParam; otherwise
-    // HcclOpResParam is used. The three fields separate the failure modes:
-    // ctx==0 means GetHcclContext returned nothing for HCCL_GROUP_ID_0, dim==0
-    // or a wrong rank count means the context is not the expected struct,
-    // size==0 means the AiRMA section was never built, and size!=0 with
-    // info==0 means the table pointer was left unpublished.
+    // table, read without dereferencing a null context. The context is always
+    // HcclOpResParam on 910_93, even on the AICPU domain. The three fields
+    // separate the failure modes: ctx==0 means GetHcclContext returned nothing
+    // for HCCL_GROUP_ID_0, dim==0 or a wrong rank count means the context is not
+    // the expected struct, size==0 means the AiRMA section was never built, and
+    // size!=0 with info==0 means the table pointer was left unpublished.
     __aicore__ inline void LoadContextDesc(uint64_t &ctx, uint32_t &dim, uint64_t &infoSize, uint64_t &info) const
     {
 #ifndef __DAV_C310__
@@ -294,15 +263,9 @@ public:
         infoSize = 0U;
         info = 0U;
         if (ctx != 0U) {
-            if (aicpuDomain_) {
-                dim = a2Context_->rankNum;
-                infoSize = a2Context_->sizeOfAiRMAInfo;
-                info = a2Context_->aiRMAInfo;
-            } else {
-                dim = context_->rankSize;
-                infoSize = context_->sizeOfAiRMAInfo;
-                info = context_->aiRMAInfo;
-            }
+            dim = context_->rankSize;
+            infoSize = context_->sizeOfAiRMAInfo;
+            info = context_->aiRMAInfo;
         }
 #else
         (void)infoSize;
@@ -382,9 +345,6 @@ private:
     bool hcommInitOk_{false};
 #else
     __gm__ HcclAiRMAInfo *rdmaInfo_{nullptr};
-    __gm__ HcclA2CombineOpParam *a2Context_{nullptr};
-    AicpuHccl *aicpuHccl_{nullptr};
-    bool aicpuDomain_{false};
 #endif
     uint32_t rankId_{0};
 };

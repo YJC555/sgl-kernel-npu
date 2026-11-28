@@ -86,27 +86,19 @@ int SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g, bool
 {
     int init = 0;
     int cc = 0;
-#ifdef __DAV_C310__
     (void)crossServer;
-    // A5 (950): HCCL exposes the AIV communication engine, so the op keeps the
-    // AlltoAll declaration and never needs an AI-RMA QP table.
+    // A3 (910_93) and A5 (950) both declare AlltoAll on the AIV engine. This is
+    // exactly what the working 910_93 notify op uses (ops/op_host/
+    // notify_dispatch_tiling.cc: OP_TYPE_ALL_TO_ALL + SetCommEngine(AIV_ENGINE),
+    // "no AICPU launched"), and what ops2's normal dispatch/combine use. The
+    // BatchWrite/opType-18 form is an A2 (910B) declaration; 910_93 rejects it
+    // with E_PARA inside HcclAllocComResourceBytiling. AIV_ENGINE keeps the
+    // control plane on the AIV cores, i.e. no collective is executed for us.
     AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
+    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aiv\n");
     init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
     cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
-#else
-    // A3 (910_93): same declaration as arch22, i.e. a single-sided batch write
-    // with the communication engine left at its default. References:
-    // moe_distribute_dispatch_v2_tiling_arch22.cpp:792-809 (opType 18, no
-    // SetCommEngine) and moe_distribute_combine_tiling_arch22.cpp:117-123
-    // (hierarchy when the world spans more than one node). The AICPU block dim
-    // stays as set by the caller, as in SetA2RuntimeConfig.
-    const std::string algConfig = crossServer ? "BatchWrite=level1:hierarchy" : "BatchWrite=level0:fullmesh";
-    AscendC::Mc2CcTilingConfig c(g, 18U, algConfig);
-    std::fprintf(stderr, "[ln-host] mc2 opType=18 alg=%s\n", algConfig.c_str());
-    init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
-    cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
-#endif
     std::fprintf(stderr, "[ln-host] mc2 tiling init=%d cc=%d\n", init, cc);
     return (init != 0 || cc != 0) ? -1 : 0;
 }
@@ -322,19 +314,11 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
     c->SetBlockDim(l.aivNum);
     c->SetScheduleMode(1);
     c->SetTilingKey(23U);
-    uint32_t aicpuBlockDim = 0U;
-#ifndef __DAV_C310__
-    // arch22 SetA2RuntimeConfig: the 910_93 MC2 domain runs its control plane on
-    // AICPU, six blocks when the domain spans servers and one otherwise.
-    aicpuBlockDim = serversU > 1U ? mc2tiling::AICPU_NUM_BLOCKS_A2 : 1U;
-    c->SetAicpuBlockDim(aicpuBlockDim);
-#endif
     std::fprintf(stderr, "[ln-host] tiling world=%llu ranks=%llu servers=%llu aiv=%u ws=%llu comm=%d\n",
                  static_cast<unsigned long long>(worldU), static_cast<unsigned long long>(ranksU),
                  static_cast<unsigned long long>(serversU), l.aivNum,
                  static_cast<unsigned long long>(ws[0]), commTiling);
-    std::fprintf(stderr, "[ln-host] tp 3 mc2 ok ret=%d block=%u aicpu=%u key=23\n", commTiling, l.aivNum,
-                 aicpuBlockDim);
+    std::fprintf(stderr, "[ln-host] tp 3 mc2 ok ret=%d block=%u key=23\n", commTiling, l.aivNum);
     OP_TILING_CHECK(commTiling != 0, OP_LOGE(n, "mc2 cc tiling generation failed"), return GRAPH_FAILED);
     return GRAPH_SUCCESS;
 }
