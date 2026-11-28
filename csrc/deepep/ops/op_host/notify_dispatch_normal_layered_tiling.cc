@@ -86,21 +86,28 @@ int SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g, bool
 {
     int init = 0;
     int cc = 0;
-    (void)crossServer;
+    // Layered (cross-server) runs use the hierarchical AlltoAll declaration,
+    // exactly like ops-transformer's A3 dispatcher (SetHcommCfg with
+    // "AlltoAll=level1:hierarchy" + AIV_ENGINE + MTE). HCCL builds the
+    // per-server QP/SQ/mem-key table (HcclOpResParam::aiRMAInfo) for this
+    // declaration; the flat fullmesh/pairwise form leaves it null. Single-server
+    // runs keep the flat form since there is no cross-server peer to reach.
+    const char *algConfig = crossServer ? "AlltoAll=level1:hierarchy"
+                                        : "AlltoAll=level0:fullmesh;level1:pairwise";
 #ifdef __DAV_C310__
     // A5 (950): HCCL exposes the AIV communication engine, so the op keeps the
     // AlltoAll declaration and never needs an AI-RMA QP table.
-    AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
+    AscendC::Mc2CcTilingConfig c(g, 8U, algConfig);
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
-    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aiv\n");
+    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=%s engine=aiv\n", algConfig);
 #else
     // A3 (910_93): declare AlltoAll with the AIV communication engine, same as
     // the A5 branch. HCCL then builds the AIV engine context and publishes the
     // AiRMA QP/SQ/mem-key table (HcclOpResParam::aiRMAInfo) the kernel posts
     // RDMA WQEs through.
-    AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
+    AscendC::Mc2CcTilingConfig c(g, 8U, algConfig);
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
-    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aiv\n");
+    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=%s engine=aiv\n", algConfig);
 #endif
     init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
     cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
