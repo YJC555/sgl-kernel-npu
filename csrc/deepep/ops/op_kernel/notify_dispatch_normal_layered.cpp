@@ -141,10 +141,14 @@ public:
         packetPrefixUb_ = &packetPrefixUb;
         memberPrefixUb_ = &memberPrefixUb;
         expertPrefixUb_ = &expertPrefixUb;
+        TracePoint(101U, info.epRankId);
         localExperts_ = info_.moeExpertNum / info_.epWorldSize;
         expertsPerServer_ = info_.moeExpertNum / info_.serverNum;
         sourceServer_ = info_.epRankId / info_.ranksPerServer;
         comm_.Init(info_.epRankId, roceContext, hcommUb, info_.isHybridDeployment != 0U);
+        // 101 -> 102 brackets CommAdapter::Init, i.e. the GetHcclContext /
+        // aiRMAInfo binding that the 910_93 path now relies on.
+        TracePoint(102U, info.epRankId);
         layout_ = CamMoeLayered::MakeWindowLayout(
             info_.moeExpertNum, info_.epWorldSize, info_.ranksPerServer, info_.serverNum, info_.physicalRounds,
             info_.slotsPerServer, info_.recordStride, info_.partialStride, info_.k, info_.isHybridDeployment != 0U);
@@ -198,8 +202,17 @@ public:
                         static_cast<uint32_t>(sameWin));
             LAYERED_LOG("[ln] ctx peer r=%u ptr=%x win=%x\n", peerRank, static_cast<uint32_t>(peerPtr),
                         static_cast<uint32_t>(peerWin));
+            // QP table bound by CommAdapter::Init; 0 means HCCL has not published
+            // aiRMAInfo for this domain yet (PostRdmaSend would fault on it).
+            uint64_t qpInfo = 0U;
+            uint32_t qpNum = 0U;
+            uint32_t qpSize = 0U;
+            uint64_t qpAddr = 0U;
+            comm_.LoadQpDesc(info_.epRankId, qpInfo, qpNum, qpSize, qpAddr);
+            LAYERED_LOG("[ln] ctx qptab=%x qpnum=%u\n", static_cast<uint32_t>(qpInfo), qpNum);
         }
 #endif
+        TracePoint(103U, info.epRankId);
     }
 
     __aicore__ inline void Process()
@@ -1306,6 +1319,14 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         PipeBarrier<PIPE_ALL>();
 #endif
         GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] t23 data ok rank=%u world=%u aiv=%u\n", data.layered.epRankId,
+                        data.layered.epWorldSize, data.layered.aivNum);
+        }
+        PipeBarrier<PIPE_ALL>();
+#endif
 #ifdef __DAV_C310__
         TBuf hcommUb;
         pipe.InitBuffer(hcommUb, kHcommUbBytes);
@@ -1333,14 +1354,30 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         auto hcommTensor = aggregateCopyTensor;
 #endif
         NotifyDispatchNormalLayered op;
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] t23 pre-init\n");
+        }
+        PipeBarrier<PIPE_ALL>();
+#endif
         op.Init(roceContext, topkIdx, layeredPlan, recvTokensPerExpert, expertTotalCount, workspace, data.layered,
                 doorbell, head, initTensor, reduceSrcTensor, reduceAccTensor, aggregateCopyTensor, hcommTensor,
                 packetPrefixTensor, memberPrefixTensor, expertPrefixTensor);
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] t23 post-init\n");
+        }
+        PipeBarrier<PIPE_ALL>();
+#endif
         op.Process();
-#ifndef __DAV_C310__
-        // Mirror the arch22 A2 layered op: release the AICPU-side HCCL client
-        // once this kernel is done so the next op can rebind cleanly.
-        hccl.Finalize();
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] t23 post-process\n");
+        }
+        PipeBarrier<PIPE_ALL>();
 #endif
 #if DEEPEP_LAYERED_DEBUG_LOG
         PipeBarrier<PIPE_ALL>();

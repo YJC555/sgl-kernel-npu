@@ -1,6 +1,7 @@
 #include "aclnn_notify_dispatch_normal_layered.h"
 #include "aclnnInner_notify_dispatch_normal_layered.h"
 #include "aclnn/opdev/platform.h"
+#include <cstdint>
 #include <cstdio>
 
 enum NnopbaseHcclServerType {
@@ -21,7 +22,8 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayeredGetWorkspaceSize(
         roceContext, topkIdx, commGroup, rankSize, rankId, ranksPerServer, moeExpertNum, slotsPerServer, epoch,
         hiddenSize, maxBs, expertAlignment, recvTokensPerExpert, layeredPlan, expertTotalCount, workspaceSize,
         executor);
-    std::fprintf(stderr, "[ln-host] aclnn notify ws ret=%d\n", static_cast<int>(ret));
+    std::fprintf(stderr, "[ln-host] aclnn notify ws ret=%d size=%llu\n", static_cast<int>(ret),
+                 static_cast<unsigned long long>(ret == 0 ? (workspaceSize ? *workspaceSize : 0U) : 0U));
     return ret;
 }
 
@@ -37,7 +39,10 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
         // 的 SetCommArgs 一致：只有 910B(A2) 走 AICPU，其余（910_93/950）都走 MTE。
         NnopbaseSetHcclServerType(executor, NNOPBASE_HCCL_SERVER_TYPE_MTE);
     }
+    std::fprintf(stderr, "[ln-host] tp 4 pre-inner ws=%llu exec=%llx\n",
+                 static_cast<unsigned long long>(workspaceSize),
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(executor)));
     aclnnStatus ret = aclnnInnerNotifyDispatchNormalLayered(workspace, workspaceSize, executor, stream);
-    std::fprintf(stderr, "[ln-host] aclnn notify exec ret=%d\n", static_cast<int>(ret));
+    std::fprintf(stderr, "[ln-host] tp 5 post-inner ret=%d\n", static_cast<int>(ret));
     return ret;
 }

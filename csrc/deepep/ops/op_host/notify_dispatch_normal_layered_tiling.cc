@@ -101,6 +101,7 @@ namespace optiling {
 static ge::graphStatus NotifyTiling(gert::TilingContext *c)
 {
     const char *n = c->GetNodeName();
+    std::fprintf(stderr, "[ln-host] tp 0 tiling enter\n");
     auto *d = c->GetTilingData<NotifyDispatchNormalLayeredTilingData>();
     auto *roceDesc = c->GetInputDesc(0);
     auto *s = c->GetInputShape(1);
@@ -120,6 +121,9 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
                         static_cast<uint64_t>(slots) > std::numeric_limits<uint32_t>::max() ||
                         static_cast<uint64_t>(hidden) > std::numeric_limits<uint32_t>::max(),
                     OP_LOGE(n, "invalid normal layered notify inputs or topology"), return GRAPH_FAILED);
+    std::fprintf(stderr, "[ln-host] tp 1 inputs ok world=%lld rank=%lld ranks=%lld ex=%lld slots=%lld h=%lld\n",
+                 static_cast<long long>(world), static_cast<long long>(rank), static_cast<long long>(ranks),
+                 static_cast<long long>(experts), static_cast<long long>(slots), static_cast<long long>(hidden));
     const uint64_t worldU = static_cast<uint64_t>(world), ranksU = static_cast<uint64_t>(ranks),
                    expertsU = static_cast<uint64_t>(experts), bsU = static_cast<uint64_t>(bs),
                    maxBsU = static_cast<uint64_t>(maxBs), slotsU = static_cast<uint64_t>(slots);
@@ -298,6 +302,7 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
     OP_TILING_CHECK(l.aivNum == 0U || !ws || !workspaceArithmetic || counterBytes > WORKSPACE_BYTES ||
                         l.totalUbSize < REQUIRED_NOTIFY_UB_BYTES,
                     OP_LOGE(n, "normal layered workspace or UB budget is invalid"), return GRAPH_FAILED);
+    std::fprintf(stderr, "[ln-host] tp 2 counters ok bytes=%llu\n", static_cast<unsigned long long>(counterBytes));
     ws[0] = SYSTEM_NEED_WORKSPACE + CamMoeLayered::AlignUp64(counterBytes);
     const int commTiling = SetComm(d, std::string(g));
     c->SetBlockDim(l.aivNum);
@@ -307,6 +312,7 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
                  static_cast<unsigned long long>(worldU), static_cast<unsigned long long>(ranksU),
                  static_cast<unsigned long long>(serversU), l.aivNum,
                  static_cast<unsigned long long>(ws[0]), commTiling);
+    std::fprintf(stderr, "[ln-host] tp 3 mc2 ok ret=%d block=%u key=23\n", commTiling, l.aivNum);
     OP_TILING_CHECK(commTiling != 0, OP_LOGE(n, "mc2 cc tiling generation failed"), return GRAPH_FAILED);
     return GRAPH_SUCCESS;
 }
