@@ -31,13 +31,20 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
                                                         aclOpExecutor *executor, aclrtStream stream)
 {
     const auto soc = op::GetCurrentPlatformInfo().GetSocVersion();
-    std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d\n", static_cast<int>(soc),
-                 NnopbaseSetHcclServerType != nullptr);
+#ifdef __DAV_C310__
+    const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_MTE;
+#else
+    // tiling 声明 BatchWrite(opType 18)，这是 AICPU/KFC 域的写法：HCCL 在
+    // HcclAllocComResourceBytiling 中按该声明分配资源，MTE 服务端会返回
+    // HCCL_E_PARA(1)。arch22 的 910_93 路径同样设置 AICPU。
+    const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_AICPU;
+#endif
+    std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d server=%d\n", static_cast<int>(soc),
+                 NnopbaseSetHcclServerType != nullptr, static_cast<int>(serverType));
     if (NnopbaseSetHcclServerType) {
-        // kernel 通过 GetHcclContext 直接读 QP 表，属于 MTE 服务端。与
-        // moe_distribute_dispatch_v2 的 SetCommArgs 一致：只有 910B(A2) 走 AICPU，其余（910_93/950）都走 MTE。
-        // A3 的 tiling 声明 BatchWrite(opType 18)，QP 表由 HCCL 在该域上发布。
-        NnopbaseSetHcclServerType(executor, NNOPBASE_HCCL_SERVER_TYPE_MTE);
+        // kernel 通过 GetHcclContext 取 MC2 op param：A3 是
+        // HcclA2CombineOpParam（AICPU），A5 是 HcclCombinOpParam（MTE/AIV）。
+        NnopbaseSetHcclServerType(executor, serverType);
     }
     std::fprintf(stderr, "[ln-host] tp 4 pre-inner ws=%llu exec=%llx\n",
                  static_cast<unsigned long long>(workspaceSize),

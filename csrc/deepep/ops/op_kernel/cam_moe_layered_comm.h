@@ -14,6 +14,12 @@ namespace CamMoeLayered {
 
 using namespace AscendC;
 
+#ifndef __DAV_C310__
+// A3 MC2 op domain is driven by the AICPU/KFC server, whose launch context is
+// HcclA2CombineOpParam and whose window/rank getters live on Hccl<AICPU>.
+using AicpuHccl = Hccl<HCCL_SERVER_TYPE_AICPU>;
+#endif
+
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()
 {
@@ -32,7 +38,20 @@ public:
         (void)isHybridDeployment;
         context_ = (__gm__ HcclOpParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
 #ifndef __DAV_C310__  // A3 AiRMA transport
-        rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
+        if (context_ == nullptr) {
+            return;
+        }
+        // BindAicpuHccl() was called by the kernel entry right after
+        // Hccl<AICPU>::InitV2/SetCcTilingV2. In that mode HCCL hands over
+        // HcclA2CombineOpParam, whose aiRMAInfo is filled once the AICPU
+        // control plane has processed the CC tiling.
+        aicpuDomain_ = (aicpuHccl_ != nullptr);
+        if (aicpuDomain_) {
+            a2Context_ = (__gm__ HcclA2CombineOpParam *)context_;
+            rdmaInfo_ = (__gm__ HcclAiRMAInfo *)a2Context_->aiRMAInfo;
+        } else {
+            rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
+        }
         (void)roceContext;
 #else  // A5 Hcomm transport
         rdmaContext_ = (__gm__ CamMoeLayeredCommContext *)roceContext;
@@ -44,12 +63,26 @@ public:
 #endif
     }
 
+#ifndef __DAV_C310__
+    // A3 only: the entry owns the Hccl<AICPU> object (it needs the tiling data
+    // for InitV2), the adapter keeps a pointer for window lookups.
+    __aicore__ inline void BindAicpuHccl(AicpuHccl *hccl)
+    {
+        aicpuHccl_ = hccl;
+    }
+#endif
+
     __aicore__ inline uint32_t RankId() const
     {
         return rankId_;
     }
     __aicore__ inline uint32_t RankSize() const
     {
+#ifndef __DAV_C310__
+        if (aicpuDomain_) {
+            return a2Context_->rankNum;
+        }
+#endif
         return GetRankDim(context_);
     }
     __aicore__ inline uint64_t RegisteredWindowBytes() const
@@ -64,8 +97,12 @@ public:
     {
 #ifdef __DAV_C310__
         return (GM_ADDR)rdmaContext_->ipcBuffer[rank];
-#endif
+#else
+        if (aicpuDomain_) {
+            return (GM_ADDR)aicpuHccl_->GetWindowsInAddr(rank);
+        }
         return GetBaseWindAddrByRankId(context_, rank, rankId_);
+#endif
     }
     __aicore__ inline GM_ADDR WindowIn(uint32_t rank) const
     {
@@ -76,6 +113,9 @@ public:
 #ifdef __DAV_C310__
         return WindowIn(rank);
 #else
+        if (aicpuDomain_) {
+            return (GM_ADDR)aicpuHccl_->GetWindowsOutAddr(rank);
+        }
         if (rank == rankId_) {
             return (GM_ADDR)context_->localWindowsOut;
         }
@@ -85,6 +125,11 @@ public:
     }
     __aicore__ inline uint64_t WinSizeBytes() const
     {
+#ifndef __DAV_C310__
+        if (aicpuDomain_) {
+            return static_cast<uint64_t>(a2Context_->winSize);
+        }
+#endif
         return GetWinSize(context_);
     }
     // Debug helper: snapshot of a peer relation resource with a null guard, so a
@@ -92,6 +137,11 @@ public:
     __aicore__ inline void LoadPeerWindow(uint32_t rank, uint64_t &nextDevPtr, uint64_t &windowIn) const
     {
 #ifndef __DAV_C310__
+        if (aicpuDomain_) {
+            nextDevPtr = 0U;
+            windowIn = reinterpret_cast<uint64_t>(aicpuHccl_->GetWindowsInAddr(rank));
+            return;
+        }
         nextDevPtr = reinterpret_cast<uint64_t>(context_->remoteRes[rank].nextDevicePtr);
         windowIn = 0U;
         if (nextDevPtr != 0U) {
@@ -118,6 +168,9 @@ public:
                                         AscendC::LocalTensor<uint32_t> &headUb, uint64_t timeoutCycles = 0U) const
     {
 #ifndef __DAV_C310__  // A3 AiRMA RDMA write
+        if (rdmaInfo_ == nullptr) {
+            return false;
+        }
         auto qpNum = rdmaInfo_->qpNum;
         auto *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_->sqPtr +
                                           static_cast<uint64_t>(dstRank) * qpNum * rdmaInfo_->sizeOfAiRMAWQ);
@@ -226,12 +279,13 @@ public:
     }
 
     // Debug helper: raw binding of the HCCL context that carries the AiRMA
-    // table, read without dereferencing a null context. The three fields
-    // separate the failure modes: ctx==0 means GetHcclContext returned nothing
-    // for HCCL_GROUP_ID_0, dim being implausible means HCCL filled the other
-    // context struct (HcclCombinOpParam, i.e. an AICPU/CCU domain) instead of
-    // HcclOpResParam, size==0 means the AiRMA section was never built, and
-    // size!=0 with info==0 means the table pointer was left unpublished.
+    // table, read without dereferencing a null context. On 910_93 the domain is
+    // AICPU/KFC, so the descriptor comes from HcclA2CombineOpParam; otherwise
+    // HcclOpResParam is used. The three fields separate the failure modes:
+    // ctx==0 means GetHcclContext returned nothing for HCCL_GROUP_ID_0, dim==0
+    // or a wrong rank count means the context is not the expected struct,
+    // size==0 means the AiRMA section was never built, and size!=0 with
+    // info==0 means the table pointer was left unpublished.
     __aicore__ inline void LoadContextDesc(uint64_t &ctx, uint32_t &dim, uint64_t &infoSize, uint64_t &info) const
     {
 #ifndef __DAV_C310__
@@ -240,9 +294,15 @@ public:
         infoSize = 0U;
         info = 0U;
         if (ctx != 0U) {
-            dim = context_->rankSize;
-            infoSize = context_->sizeOfAiRMAInfo;
-            info = context_->aiRMAInfo;
+            if (aicpuDomain_) {
+                dim = a2Context_->rankNum;
+                infoSize = a2Context_->sizeOfAiRMAInfo;
+                info = a2Context_->aiRMAInfo;
+            } else {
+                dim = context_->rankSize;
+                infoSize = context_->sizeOfAiRMAInfo;
+                info = context_->aiRMAInfo;
+            }
         }
 #else
         (void)infoSize;
@@ -259,6 +319,12 @@ public:
     __aicore__ inline void LoadQpState(uint32_t dstRank, uint32_t &head, uint32_t &tail, uint32_t &depth) const
     {
 #ifndef __DAV_C310__
+        head = 0U;
+        tail = 0U;
+        depth = 0U;
+        if (rdmaInfo_ == nullptr) {
+            return;
+        }
         const uint32_t qpNum = rdmaInfo_->qpNum;
         auto *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_->sqPtr +
                                           static_cast<uint64_t>(dstRank) * qpNum * rdmaInfo_->sizeOfAiRMAWQ);
@@ -281,6 +347,7 @@ public:
     {
         if (dstRank == rankId_) return true;
 #ifndef __DAV_C310__
+        if (rdmaInfo_ == nullptr) return false;
         const uint32_t qpNum = rdmaInfo_->qpNum;
         auto *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_->sqPtr +
                                           static_cast<uint64_t>(dstRank) * qpNum * rdmaInfo_->sizeOfAiRMAWQ);
@@ -315,6 +382,9 @@ private:
     bool hcommInitOk_{false};
 #else
     __gm__ HcclAiRMAInfo *rdmaInfo_{nullptr};
+    __gm__ HcclA2CombineOpParam *a2Context_{nullptr};
+    AicpuHccl *aicpuHccl_{nullptr};
+    bool aicpuDomain_{false};
 #endif
     uint32_t rankId_{0};
 };

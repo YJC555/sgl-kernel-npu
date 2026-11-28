@@ -77,6 +77,16 @@ class NotifyDispatchNormalLayered
 public:
     __aicore__ inline NotifyDispatchNormalLayered() {}
 
+#ifndef __DAV_C310__
+    // A3: the entry owns the Hccl<AICPU> object because InitV2 needs the tiling
+    // struct. Must be called after InitV2/SetCcTilingV2 and before Init(), so
+    // CommAdapter can resolve HcclA2CombineOpParam and its window arrays.
+    __aicore__ inline void BindAicpuHccl(CamMoeLayered::AicpuHccl *hccl)
+    {
+        comm_.BindAicpuHccl(hccl);
+    }
+#endif
+
     // Print the stage id from AIV 0, drain every pipeline of this core and then
     // converge all cores. Called before each stage, so the marker printed last
     // identifies the stage that faulted (507035) or hung.
@@ -1366,6 +1376,26 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         auto hcommTensor = aggregateCopyTensor;
 #endif
         NotifyDispatchNormalLayered op;
+#ifndef __DAV_C310__
+        // 910_93 runs this op on the AICPU MC2 domain (tiling declares
+        // BatchWrite/opType 18 + SetAicpuBlockDim). The kernel side must bind
+        // that domain and hand it the CC tiling before reading
+        // HcclA2CombineOpParam::aiRMAInfo, otherwise HCCL never publishes the
+        // AI-RMA QP table. Same three calls as arch22's layered kernels.
+        Hccl<HCCL_SERVER_TYPE_AICPU> aicpuHccl;
+        GM_ADDR aicpuCtx = AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+        aicpuHccl.InitV2(aicpuCtx, &data);
+        aicpuHccl.SetCcTilingV2(offsetof(NotifyDispatchNormalLayeredTilingData, mc2CcTiling));
+        op.BindAicpuHccl(&aicpuHccl);
+#if DEEPEP_LAYERED_DEBUG_LOG
+        PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() == 0U) {
+            LAYERED_LOG("[ln] t23 aicpu ctx=%x cc=ok\n",
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(aicpuCtx)));
+        }
+        PipeBarrier<PIPE_ALL>();
+#endif
+#endif
 #if DEEPEP_LAYERED_DEBUG_LOG
         PipeBarrier<PIPE_ALL>();
         if (GetBlockIdx() == 0U) {
