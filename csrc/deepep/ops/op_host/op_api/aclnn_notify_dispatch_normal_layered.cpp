@@ -35,10 +35,10 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
     // A5: tiling 声明 AlltoAll + AIV_ENGINE，通信控制面在 AIV 核上，服务端为 MTE。
     const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_MTE;
 #else
-    // A3: tiling 用 ops2 normal dispatch/combine 在 910_93 上的写法（opType 8 +
-    // AlltoAll、不设 AIV_ENGINE），MC2 域由 AICPU/KFC 服务端驱动。kernel 侧用
-    // Hccl<AICPU>::InitV2/SetCcTilingV2 绑定并通过 GetWindowsInAddr 取对端窗口。
-    const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_AICPU;
+    // A3: tiling 与出厂 notify_dispatch 一致（opType 8 + AlltoAll + AIV_ENGINE，
+    // 不拉起 AICPU），因此服务端必须是 MTE；设成 AICPU 会让 HCCL 按 AICPU 域准备
+    // 资源，kernel 读 remoteRes 拿到的跨节点窗口全为 0。
+    const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_MTE;
 #endif
     std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d server=%d\n", static_cast<int>(soc),
                  NnopbaseSetHcclServerType != nullptr, static_cast<int>(serverType));

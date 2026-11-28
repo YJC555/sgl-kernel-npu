@@ -77,15 +77,6 @@ class NotifyDispatchNormalLayered
 public:
     __aicore__ inline NotifyDispatchNormalLayered() {}
 
-#ifndef __DAV_C310__
-    // A3: the entry owns the Hccl<AICPU> object (InitV2 needs the tiling data).
-    // Must be called after InitV2/SetCcTilingV2 and before Process().
-    __aicore__ inline void BindAicpuHccl(CamMoeLayered::AicpuHccl *hccl)
-    {
-        comm_.BindAicpuHccl(hccl);
-    }
-#endif
-
     // Re-print the HCCL window binding at the very end of the kernel. The
     // per-core log buffer is a ring and the stop markers evict the init-time
     // snapshot before a trap is dumped, so these lines (the newest ones) are
@@ -125,9 +116,13 @@ public:
             uint32_t shown = 0U;
             for (uint32_t target = 0U; target < info_.serverNum && shown < 8U; ++target, ++shown) {
                 const uint32_t rank = target * rps + info_.rankInServer;
-                LAYERED_LOG("[ln] end win t=%u r=%u in=%x out=%x\n", target, rank,
-                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(comm_.WindowIn(rank))),
-                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(comm_.WindowOut(rank))));
+                uint64_t ndp = 0U;
+                uint64_t win = 0U;
+                comm_.LoadPeerWindow(rank, ndp, win);
+                // ndp=0 means HCCL published no relation for that rank at all;
+                // ndp!=0 with in=0 means the relation exists but windowsIn is 0.
+                LAYERED_LOG("[ln] end win t=%u r=%u ndp=%x in=%x\n", target, rank,
+                            static_cast<uint32_t>(ndp), static_cast<uint32_t>(win));
             }
         }
         LAYERED_LOG("[ln] end aiv=%u rank=%u winB=%u rps=%u srv=%u\n", GetBlockIdx(), info_.epRankId,
@@ -281,14 +276,6 @@ public:
                         static_cast<uint32_t>(sameWin));
             LAYERED_LOG("[ln] ctx peer r=%u ptr=%x win=%x\n", peerRank, static_cast<uint32_t>(peerPtr),
                         static_cast<uint32_t>(peerWin));
-            // QP table bound by CommAdapter::Init; 0 means HCCL has not published
-            // aiRMAInfo for this domain yet (PostRdmaSend would fault on it).
-            uint64_t qpInfo = 0U;
-            uint32_t qpNum = 0U;
-            uint32_t qpSize = 0U;
-            uint64_t qpAddr = 0U;
-            comm_.LoadQpDesc(info_.epRankId, qpInfo, qpNum, qpSize, qpAddr);
-            LAYERED_LOG("[ln] ctx qptab=%x qpnum=%u\n", static_cast<uint32_t>(qpInfo), qpNum);
         }
 #endif
         TracePoint(103U, info.epRankId);
@@ -893,12 +880,17 @@ private:
             // 发送给同号卡
             TracePoint(701U, target);
             const uint32_t proxyRank = target * info_.ranksPerServer + info_.rankInServer;
-            // 700 -> 703 brackets the window resolution. A3 resolves the peer
-            // window through Hccl<AICPU>::GetWindowsInAddr, which reads the
-            // shared AICPU context: if the last marker is 700 the fault is in
-            // that lookup, not in the copy that follows.
+            // 700 -> 703 brackets the window resolution: it reads this device's
+            // relation table (remoteRes[proxyRank].nextDevicePtr->windowsIn). If
+            // the last marker is 700, that dereference faulted instead of the
+            // copy that follows; if 705 shows up, the relation was missing and
+            // the lane was skipped rather than written to address 0.
             TracePoint(700U, proxyRank);
             auto *in = (__gm__ uint8_t *)comm_.WindowIn(proxyRank);
+            // Resolve once: a null base means HCCL published no (or a zero)
+            // window for this rank, so the lane is skipped below instead of
+            // being written through a null destination.
+            const bool peerUsable = comm_.PeerWindowUsable(proxyRank);
             // 目的位置
             auto *dst = in + off;
             auto *remoteFlag = (__gm__ uint64_t *)(in + flagOff);
@@ -907,8 +899,9 @@ private:
             TracePoint(703U, proxyRank);
 #if DEEPEP_LAYERED_DEBUG_LOG
             if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
-                // Pointer-only view: no dereference, so it survives even when the
-                // QP descriptor is bad, and it shows which branch is taken.
+                // Pointer-only view: no dereference, so it survives even when
+                // the peer window is unpublished, and it shows which branch is
+                // taken (in=0 means the lane is skipped, see 705).
                 LAYERED_LOG("[ln] ctl self=%u proxy=%u rps=%u inSrv=%u\n", info_.epRankId, proxyRank,
                             info_.ranksPerServer, info_.rankInServer);
                 LAYERED_LOG("[ln] ctl dst=%x src=%x bytes=%u\n",
@@ -921,7 +914,7 @@ private:
                             static_cast<uint32_t>(flagOff));
             }
 #endif
-            if (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
+            if (peerUsable) {
                 CopyWindowBytes(payload, dst, layout_.controlStride);
 #if DEEPEP_LAYERED_DEBUG_LOG
                 // Drain MTE3 here so a bad peer destination traps inside this
@@ -929,33 +922,32 @@ private:
                 // reported at kernel exit as a bare cross-device MTE error.
                 SyncFunc<HardEvent::MTE3_S>();
 #endif
-            } else {
-#if DEEPEP_LAYERED_DEBUG_LOG
-                if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
-                    // Zero-dereference descriptor view first: it survives even when
-                    // the QP entry itself cannot be read.
-                    uint64_t qpInfo = 0U;
-                    uint32_t qpNum = 0U;
-                    uint32_t qpSize = 0U;
-                    uint64_t qpAddr = 0U;
-                    comm_.LoadQpDesc(proxyRank, qpInfo, qpNum, qpSize, qpAddr);
-                    LAYERED_LOG("[ln] qp dst=%u info=%x num=%u size=%u addr=%x\n", proxyRank,
-                                static_cast<uint32_t>(qpInfo), qpNum, qpSize, static_cast<uint32_t>(qpAddr));
-                    uint32_t qpHead = 0U;
-                    uint32_t qpTail = 0U;
-                    uint32_t qpDepth = 0U;
-                    comm_.LoadQpState(proxyRank, qpHead, qpTail, qpDepth);
-                    LAYERED_LOG("[ln] sq dst=%u head=%u tail=%u depth=%u\n", proxyRank, qpHead, qpTail, qpDepth);
-                }
-#endif
+            }
+#ifdef __DAV_C310__
+            else {
                 comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
             }
+#else
+            else {
+                // 910_93: HCCL published no window for this rank. Writing to the
+                // resulting null destination is the MTE-to-0 trap, so skip the
+                // lane and let the end dump name the offending rank.
+                TracePoint(705U, proxyRank);
+            }
+#endif
             TracePoint(704U, target);
-            if (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
+            if (peerUsable) {
                 CopyWindowFlag(remoteFlag, *flag);
-            } else {
+            }
+#ifdef __DAV_C310__
+            else {
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, proxyRank, *doorbell_, *head_);
             }
+#else
+            else {
+                TracePoint(706U, proxyRank);
+            }
+#endif
         }
         TracePoint(702U, 0U);
     }
@@ -1005,6 +997,12 @@ private:
 
             const uint32_t owner = sourceServer_ * info_.ranksPerServer + ownerInServer;
             auto *ownerWindow = (__gm__ uint8_t *)comm_.WindowIn(owner);  // 本地其他rank的接收缓冲区
+            if (ownerWindow == nullptr) {
+                // Unmapped same-server window: copying to it would be an MTE
+                // access to address 0. Flag the rank and skip.
+                TracePoint(805U, ownerInServer);
+                continue;
+            }
             const uint32_t blockBytes = 32U;
             const uint32_t blockCount = static_cast<uint32_t>(layout_.proxyAggregateStride / blockBytes);
             TracePoint(803U, ownerInServer);
@@ -1105,6 +1103,10 @@ private:
         for (uint32_t proxyInServer = proxyBegin; proxyInServer < proxyEnd; ++proxyInServer) {
             const uint32_t proxy = sourceServer_ * info_.ranksPerServer + proxyInServer;
             auto *proxyWindow = (__gm__ uint8_t *)comm_.WindowIn(proxy);
+            if (proxyWindow == nullptr) {
+                TracePoint(1003U, proxyInServer);
+                continue;
+            }
             TracePoint(1001U, proxyInServer);
             CopyWindowBytes(out + BaseAckStageOffset(layout_, proxyInServer, 0U),
                             proxyWindow + BaseAckFanoutOwnerOffset(layout_, info_.rankInServer),
@@ -1222,6 +1224,7 @@ private:
             // follows, so the last marker names which of the three faulted.
             TracePoint(1300U, source);
             auto *sin = (__gm__ uint8_t *)comm_.WindowIn(source);
+            const bool peerUsable = comm_.PeerWindowUsable(source);
             // [ownerInServer][localExpert]
             auto *dst = sin + BaseAckLaneOffset(layout_, info_.epWorldSize, source, sourceServer_);
             TracePoint(1301U, sourceServer);
@@ -1234,15 +1237,23 @@ private:
                             static_cast<uint32_t>(layout_.baseAckStride));
             }
 #endif
-            if (source == info_.epRankId || comm_.DirectWindowWrite()) {
+            if (peerUsable) {
                 CopyWindowBytes(ack, dst, layout_.baseAckStride);
 #if DEEPEP_LAYERED_DEBUG_LOG
                 // Same as stage 6: surface a bad peer address at 1301/1303.
                 SyncFunc<HardEvent::MTE3_S>();
 #endif
-            } else {
+            }
+#ifdef __DAV_C310__
+            else {
                 comm_.PostRdmaSend(ack, dst, source, layout_.baseAckStride, *doorbell_, *head_);
             }
+#else
+            else {
+                // 910_93: no window for this rank; never write to address 0.
+                TracePoint(1305U, source);
+            }
+#endif
             TracePoint(1303U, sourceServer);
             auto *flag =
                 (__gm__ uint64_t *)(out + BaseAckFlagOffset(layout_, info_.epWorldSize, source, sourceServer_));
@@ -1252,11 +1263,18 @@ private:
             cacheWriteThrough((__gm__ uint8_t *)flag, sizeof(uint64_t));
             auto *remoteFlag =
                 (__gm__ uint64_t *)(sin + BaseAckFlagOffset(layout_, info_.epWorldSize, source, sourceServer_));
-            if (source == info_.epRankId || comm_.DirectWindowWrite()) {
+            if (peerUsable) {
                 CopyWindowFlag(remoteFlag, *flag);
-            } else {
+            }
+#ifdef __DAV_C310__
+            else {
                 comm_.PostReadyFlag((GM_ADDR)flag, (GM_ADDR)remoteFlag, source, *doorbell_, *head_);
             }
+#else
+            else {
+                TracePoint(1306U, source);
+            }
+#endif
         }
         TracePoint(1302U, 0U);
     }
@@ -1467,18 +1485,6 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         auto hcommTensor = aggregateCopyTensor;
 #endif
         NotifyDispatchNormalLayered op;
-#ifndef __DAV_C310__
-        // 910_93: bind the AICPU MC2 domain and hand it the CC tiling, exactly
-        // like ops2's normal dispatch/combine kernels on this chip. The launch
-        // context stays HcclOpResParam; the adapter resolves peer windows
-        // through this handle (GetWindowsInAddr), which is the only source that
-        // maps cross-node ranks in this mode.
-        Hccl<HCCL_SERVER_TYPE_AICPU> aicpuHccl;
-        GM_ADDR aicpuCtx = AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-        aicpuHccl.InitV2(aicpuCtx, &data);
-        aicpuHccl.SetCcTilingV2(offsetof(NotifyDispatchNormalLayeredTilingData, mc2CcTiling));
-        op.BindAicpuHccl(&aicpuHccl);
-#endif
 #if DEEPEP_LAYERED_DEBUG_LOG
         PipeBarrier<PIPE_ALL>();
         if (GetBlockIdx() == 0U) {

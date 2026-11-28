@@ -94,16 +94,16 @@ int SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g, bool
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
     std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aiv\n");
 #else
-    // A3 (910_93): follow the normal dispatch/combine kernels that do work on
-    // this chip (ops2 cam_moe_dispatch_normal_tiling.cc): opType 8 + AlltoAll
-    // with the communication engine left at its default (AICPU). Do NOT set
-    // AIV_ENGINE here: with it HCCL does not map the cross-node peer windows,
-    // so remoteRes[].nextDevicePtr->windowsIn reads as 0 and the kernel's first
-    // cross-server copy traps with "MTE accesses an invalid GM address". The
-    // BatchWrite/opType-18 form is an A2 (910B) declaration and is rejected by
-    // 910_93 with E_PARA inside HcclAllocComResourceBytiling.
+    // A3 (910_93): the shipped notify_dispatch on this chip declares opType 8
+    // (AlltoAll) with AIV_ENGINE ("通过不拉起AICPU，提高算子退出性能") and its kernel
+    // reads peer windows straight from remoteRes[].nextDevicePtr. Any other
+    // declaration leaves those relations unpublished: with the AICPU engine
+    // every cross-node windowsIn reads 0, which is the MTE-write-to-0 trap.
+    // BatchWrite/opType-18 is an A2 (910B) form and is rejected by 910_93 with
+    // E_PARA inside HcclAllocComResourceBytiling.
     AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
-    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aicpu\n");
+    c.SetCommEngine(mc2tiling::AIV_ENGINE);
+    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aiv\n");
 #endif
     init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
     cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
