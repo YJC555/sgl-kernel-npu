@@ -357,7 +357,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
                                              CamMoeLayeredProtocol protocol, uint32_t ranksPerServer,
                                              uint64_t minimumWindowBytes, LayeredCommResource &resource)
 {
-    lastStep_ = "args";
     if (comm == nullptr || ranksPerServer == 0U || minimumWindowBytes == 0U ||
         (protocol != CAM_MOE_LAYERED_PROTOCOL_ROCE && protocol != CAM_MOE_LAYERED_PROTOCOL_UBOE)) {
         HostTrace("fail step=args comm=%p rps=%u minBytes=%llu proto=%u", comm, ranksPerServer,
@@ -366,7 +365,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     }
     HostTrace("enter comm=%p tag=%s rps=%u minBytes=%llu proto=%u", comm, contextTag.c_str(), ranksPerServer,
               static_cast<unsigned long long>(minimumWindowBytes), static_cast<uint32_t>(protocol));
-    lastStep_ = "rankinfo";
     CommRankInfo rankInfo{};
     HcclResult ret = GetCommRankInfo(comm, ranksPerServer, rankInfo);
     if (ret != HCCL_SUCCESS) {
@@ -392,7 +390,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     std::lock_guard<std::mutex> lock(shared->mutex);
     void *engineContext = nullptr;
     bool contextExists = false;
-    lastStep_ = "engine-get";
     ret = GetExistingEngineContext(comm, contextTag, engineContext, contextExists);
     if (ret != HCCL_SUCCESS) {
         HostTrace("fail step=engine-get code=%d", static_cast<int>(ret));
@@ -403,7 +400,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
         return HCCL_E_NOT_FOUND;
     }
 
-    lastStep_ = "validate";
     ret = ValidateSharedWindow(*shared, contextTag, rankInfo, ranksPerServer, protocol, requestedBytes,
                                minimumWindowBytes, contextExists);
     if (ret != HCCL_SUCCESS) {
@@ -414,7 +410,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
         FillResource(*shared, engineContext, resource);
         return HCCL_SUCCESS;
     }
-    lastStep_ = "window";
     if (shared->buffer == nullptr) {
         ret = AllocateAndRegisterWindow(comm, memTag, requestedBytes, rankInfo, ranksPerServer, protocol, *shared);
         if (ret != HCCL_SUCCESS) {
@@ -425,7 +420,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     }
     HostTrace("stage=window ok bytes=%llu", static_cast<unsigned long long>(shared->payloadBytes));
 
-    lastStep_ = "channels";
     if (!shared->hostReady) {
         CamMoeLayeredCommContext host{};
         ret = BuildHostContext(comm, memTag, rankInfo, ranksPerServer, protocol, *shared, host);
@@ -438,7 +432,6 @@ HcclResult LayeredCommContextManager::Create(HcclComm comm, const std::string &c
     }
     HostTrace("stage=channels ok");
 
-    lastStep_ = "engine";
     ret = PublishEngineContext(comm, contextTag, shared->host, contextExists, engineContext);
     if (ret != HCCL_SUCCESS) {
         HostTrace("fail step=engine code=%d", static_cast<int>(ret));

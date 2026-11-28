@@ -34,9 +34,9 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
     std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d\n", static_cast<int>(soc),
                  NnopbaseSetHcclServerType != nullptr);
     if (NnopbaseSetHcclServerType) {
-        // tiling 用 AlltoAll + SetCommEngine(AIV_ENGINE)，kernel 通过
-        // GetHcclContext 直接读 QP 表，属于 MTE 服务端。与 moe_distribute_dispatch_v2
-        // 的 SetCommArgs 一致：只有 910B(A2) 走 AICPU，其余（910_93/950）都走 MTE。
+        // kernel 通过 GetHcclContext 直接读 QP 表，属于 MTE 服务端。与
+        // moe_distribute_dispatch_v2 的 SetCommArgs 一致：只有 910B(A2) 走 AICPU，其余（910_93/950）都走 MTE。
+        // A3 的 tiling 声明 BatchWrite(opType 18)，QP 表由 HCCL 在该域上发布。
         NnopbaseSetHcclServerType(executor, NNOPBASE_HCCL_SERVER_TYPE_MTE);
     }
     std::fprintf(stderr, "[ln-host] tp 4 pre-inner ws=%llu exec=%llx\n",

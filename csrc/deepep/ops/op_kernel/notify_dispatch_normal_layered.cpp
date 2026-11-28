@@ -179,6 +179,18 @@ public:
             LAYERED_LOG("[ln] init off cnt=%u mcnt=%u slot=%u exp=%u leoff=%u lecnt=%u\n", info_.packetCountOffset,
                         info_.dispatchMemberCountOffset, info_.packetSlotOffset, info_.expertCountOffset,
                         info_.localExpertOffset, info_.localExpertCountOffset);
+            // HCCL context / AiRMA binding, printed first because every later
+            // snapshot dereferences the same context: ctx=0 means
+            // GetHcclContext returned nothing, dim=0 with ctx!=0 means HCCL
+            // filled a different context struct, and infoSz=0 means the AiRMA
+            // section was never built for this domain.
+            uint64_t ctxRaw = 0U;
+            uint32_t ctxDim = 0U;
+            uint64_t infoSize = 0U;
+            uint64_t infoRaw = 0U;
+            comm_.LoadContextDesc(ctxRaw, ctxDim, infoSize, infoRaw);
+            LAYERED_LOG("[ln] ctx raw=%x dim=%u infoSz=%u info=%x\n", static_cast<uint32_t>(ctxRaw), ctxDim,
+                        static_cast<uint32_t>(infoSize), static_cast<uint32_t>(infoRaw));
             // Peer window snapshot: a zero windowsIn for a cross-node rank is
             // exactly what turns WindowIn() into the null destination that
             // stage 6 currently writes to.

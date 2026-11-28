@@ -225,6 +225,33 @@ public:
 #endif
     }
 
+    // Debug helper: raw binding of the HCCL context that carries the AiRMA
+    // table, read without dereferencing a null context. The three fields
+    // separate the failure modes: ctx==0 means GetHcclContext returned nothing
+    // for HCCL_GROUP_ID_0, dim being implausible means HCCL filled the other
+    // context struct (HcclCombinOpParam, i.e. an AICPU/CCU domain) instead of
+    // HcclOpResParam, size==0 means the AiRMA section was never built, and
+    // size!=0 with info==0 means the table pointer was left unpublished.
+    __aicore__ inline void LoadContextDesc(uint64_t &ctx, uint32_t &dim, uint64_t &infoSize, uint64_t &info) const
+    {
+#ifndef __DAV_C310__
+        ctx = reinterpret_cast<uint64_t>(context_);
+        dim = 0U;
+        infoSize = 0U;
+        info = 0U;
+        if (ctx != 0U) {
+            dim = context_->rankSize;
+            infoSize = context_->sizeOfAiRMAInfo;
+            info = context_->aiRMAInfo;
+        }
+#else
+        (void)infoSize;
+        (void)info;
+        ctx = reinterpret_cast<uint64_t>(context_);
+        dim = ctx != 0U ? GetRankDim(context_) : 0U;
+#endif
+    }
+
     // Debug helper: snapshot of the AiRMA SQ flow-control words for dstRank.
     // head is the producer index this kernel maintains; tail is advanced by the
     // transport when WQEs complete. A frozen tail is what turns the queue-space
