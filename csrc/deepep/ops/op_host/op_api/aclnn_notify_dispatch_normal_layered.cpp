@@ -1,5 +1,6 @@
 #include "aclnn_notify_dispatch_normal_layered.h"
 #include "aclnnInner_notify_dispatch_normal_layered.h"
+#include "aclnn/opdev/platform.h"
 
 enum NnopbaseHcclServerType {
     NNOPBASE_HCCL_SERVER_TYPE_AICPU = 0,
@@ -24,7 +25,13 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
                                                         aclOpExecutor *executor, aclrtStream stream)
 {
     if (NnopbaseSetHcclServerType) {
-        NnopbaseSetHcclServerType(executor, NNOPBASE_HCCL_SERVER_TYPE_MTE);
+        // A3 的通信控制面在 AICPU（tiling 用 BatchWrite + SetAicpuBlockDim，
+        // kernel 用 Hccl<HCCL_SERVER_TYPE_AICPU>::InitV2/SetCcTilingV2）；
+        // A5 走 AIV 引擎，对应 MTE。类型必须与 tiling/kernel 一致，
+        // 否则 HcclAlltoComResourceByTiling 解析通信域失败（ret=1）。
+        const bool isA3 = op::GetCurrentPlatformInfo().GetSocVersion() == op::SocVersion::ASCEND910_93;
+        NnopbaseSetHcclServerType(executor, isA3 ? NNOPBASE_HCCL_SERVER_TYPE_AICPU
+                                                 : NNOPBASE_HCCL_SERVER_TYPE_MTE);
     }
     return aclnnInnerNotifyDispatchNormalLayered(workspace, workspaceSize, executor, stream);
 }
