@@ -29,18 +29,13 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
                                                         aclOpExecutor *executor, aclrtStream stream)
 {
     const auto soc = op::GetCurrentPlatformInfo().GetSocVersion();
-    const bool isA3 = soc == op::SocVersion::ASCEND910_93;
-    const int type = isA3 ? static_cast<int>(NNOPBASE_HCCL_SERVER_TYPE_AICPU)
-                          : static_cast<int>(NNOPBASE_HCCL_SERVER_TYPE_MTE);
-    std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d type=%d hook=%d\n", static_cast<int>(soc), type,
+    std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d\n", static_cast<int>(soc),
                  NnopbaseSetHcclServerType != nullptr);
     if (NnopbaseSetHcclServerType) {
-        // A3 的通信控制面在 AICPU（tiling 用 BatchWrite + SetAicpuBlockDim，
-        // kernel 用 Hccl<HCCL_SERVER_TYPE_AICPU>::InitV2/SetCcTilingV2）；
-        // A5 走 AIV 引擎，对应 MTE。类型必须与 tiling/kernel 一致，
-        // 否则 HCCL 分配通信资源失败（ret=1）。
-        NnopbaseSetHcclServerType(executor, isA3 ? NNOPBASE_HCCL_SERVER_TYPE_AICPU
-                                                 : NNOPBASE_HCCL_SERVER_TYPE_MTE);
+        // tiling 用 AlltoAll + SetCommEngine(AIV_ENGINE)，kernel 通过
+        // GetHcclContext 直接读 QP 表，属于 MTE 服务端。与 moe_distribute_dispatch_v2
+        // 的 SetCommArgs 一致：只有 910B(A2) 走 AICPU，其余（910_93/950）都走 MTE。
+        NnopbaseSetHcclServerType(executor, NNOPBASE_HCCL_SERVER_TYPE_MTE);
     }
     aclnnStatus ret = aclnnInnerNotifyDispatchNormalLayered(workspace, workspaceSize, executor, stream);
     std::fprintf(stderr, "[ln-host] aclnn notify exec ret=%d\n", static_cast<int>(ret));

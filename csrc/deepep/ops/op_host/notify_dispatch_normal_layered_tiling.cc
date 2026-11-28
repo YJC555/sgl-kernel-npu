@@ -82,27 +82,17 @@ bool ValidPlanLayout(const CamMoeLayered::PlanLayout &p, uint64_t packetSlots, u
 // Returns 0 only when both mc2 tiling blobs were produced. arch22 checks these
 // return values; an unchecked failure here leaves a half-filled tiling behind
 // and surfaces much later as an opaque HCCL resource-allocation error.
-int SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g, bool crossServer)
+int SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g)
 {
-    int init = 0;
-    int cc = 0;
-#ifdef __DAV_C310__
-    (void)crossServer;
-    // A5 (950): HCCL exposes the AIV communication engine, so the op keeps the
-    // AlltoAll declaration and never needs an AI-RMA QP table.
+    // A3 (910_93) and A5 (950) both drive MC2 on the AIV/MTE engine. HCCL hands
+    // the QP table (HcclOpResParam::aiRMAInfo) to the kernel through the launch
+    // context, so no AICPU control-plane handshake is involved. This mirrors the
+    // 910C branch of arch22 (allto_allv_grouped_mat_mul_tiling_a3.cpp: AlltoAll
+    // declaration + SetCommEngine(ENGINE_MTE)); ENGINE_MTE == AIV_ENGINE == 3.
     AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
-    init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
-    cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
-#else
-    // A3 (910_93): HCCL only publishes the AI-RMA QP table (aiRMAInfo) for a
-    // single-sided batch write. Layered links just the same-slot card on the
-    // peer server, so the inter-server level must be hierarchy.
-    const std::string algConfig = crossServer ? "BatchWrite=level1:hierarchy" : "BatchWrite=level0:fullmesh";
-    AscendC::Mc2CcTilingConfig c(g, 18U, algConfig);
-    init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
-    cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
-#endif
+    const int init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
+    const int cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
     std::fprintf(stderr, "[ln-host] mc2 tiling init=%d cc=%d\n", init, cc);
     return (init != 0 || cc != 0) ? -1 : 0;
 }
@@ -309,22 +299,14 @@ static ge::graphStatus NotifyTiling(gert::TilingContext *c)
                         l.totalUbSize < REQUIRED_NOTIFY_UB_BYTES,
                     OP_LOGE(n, "normal layered workspace or UB budget is invalid"), return GRAPH_FAILED);
     ws[0] = SYSTEM_NEED_WORKSPACE + CamMoeLayered::AlignUp64(counterBytes);
-    const int commTiling = SetComm(d, std::string(g), servers > 1U);
-    uint32_t aicpuBlockDim = 0U;
-#ifndef __DAV_C310__
-    // A3 keeps the communication control plane on AICPU. Cross-server needs the
-    // full AICPU service block set; a single server only needs one block.
-    aicpuBlockDim = servers > 1U ? mc2tiling::AICPU_NUM_BLOCKS_A2 : 1U;
-    c->SetAicpuBlockDim(aicpuBlockDim);
-#endif
+    const int commTiling = SetComm(d, std::string(g));
     c->SetBlockDim(l.aivNum);
     c->SetScheduleMode(1);
     c->SetTilingKey(23U);
-    std::fprintf(stderr,
-                 "[ln-host] tiling world=%llu ranks=%llu servers=%llu aiv=%u aicpu=%u ws=%llu cross=%d comm=%d\n",
+    std::fprintf(stderr, "[ln-host] tiling world=%llu ranks=%llu servers=%llu aiv=%u ws=%llu comm=%d\n",
                  static_cast<unsigned long long>(worldU), static_cast<unsigned long long>(ranksU),
-                 static_cast<unsigned long long>(serversU), l.aivNum, aicpuBlockDim,
-                 static_cast<unsigned long long>(ws[0]), servers > 1U ? 1 : 0, commTiling);
+                 static_cast<unsigned long long>(serversU), l.aivNum,
+                 static_cast<unsigned long long>(ws[0]), commTiling);
     OP_TILING_CHECK(commTiling != 0, OP_LOGE(n, "mc2 cc tiling generation failed"), return GRAPH_FAILED);
     return GRAPH_SUCCESS;
 }

@@ -1306,17 +1306,6 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         PipeBarrier<PIPE_ALL>();
 #endif
         GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
-#ifndef __DAV_C310__
-        // A3 (910_93): the HCCL control plane lives on AICPU. InitV2 binds this
-        // op to the communication domain and SetCcTilingV2 hands mc2CcTiling to
-        // the AICPU service; that call is what finally publishes the AI-RMA QP
-        // table into HcclOpParam::aiRMAInfo. Without these two calls aiRMAInfo
-        // stays 0 and PostRdmaSend dereferences a null pointer.
-        auto contextGM0 = AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-        Hccl<HCCL_SERVER_TYPE_AICPU> hccl;
-        hccl.InitV2(contextGM0, &data);
-        hccl.SetCcTilingV2(offsetof(NotifyDispatchNormalLayeredTilingData, mc2CcTiling));
-#endif
 #ifdef __DAV_C310__
         TBuf hcommUb;
         pipe.InitBuffer(hcommUb, kHcommUbBytes);
