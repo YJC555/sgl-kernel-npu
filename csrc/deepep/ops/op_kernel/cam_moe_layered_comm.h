@@ -14,11 +14,12 @@ namespace CamMoeLayered {
 
 using namespace AscendC;
 
-// 910_93: the op is declared with AIV_ENGINE (same as the shipped
-// notify_dispatch tiling), so no AICPU/KFC server is launched and the peer
-// windows come from the launch context's raw relation table
-// (remoteRes[].nextDevicePtr->windowsIn). Hccl<AICPU>::GetWindowsInAddr is NOT
-// usable here: it returns 0 for every cross-node rank on this chip.
+// 910_93 uses the same data plane as A5: tiling declares AlltoAll with
+// AIV_ENGINE and aclnn selects the MTE server, so HCCL builds the AIV engine
+// context and publishes the AiRMA QP/SQ/mem-key table in
+// HcclOpResParam::aiRMAInfo. Every non-local send is an RDMA write posted by
+// PostRdmaSend (WQE + doorbell); the peer window address only supplies the
+// remote virtual address written into the WQE, never a local copy target.
 
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()
@@ -37,10 +38,11 @@ public:
         rankId_ = rankId;
         (void)isHybridDeployment;
         context_ = (__gm__ HcclOpParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-#ifndef __DAV_C310__  // A3 transport
-        // The launch context is the MC2 op param; peer windows are read from
-        // its raw relation table. HCCL never publishes an AI-RMA QP table for
-        // an AlltoAll MC2 op on 910_93, so the data plane is window writes.
+#ifndef __DAV_C310__  // A3 AiRMA RDMA write transport
+        // aiRMAInfo is published by the AIV communication engine. When HCCL
+        // leaves it null (e.g. HcclEngineCtxGet(COMM_ENGINE_AIV) failed) every
+        // PostRdmaSend returns false and the kernel's send trace points report
+        // it, instead of the op silently falling back to a window copy.
         rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
         (void)roceContext;
 #else  // A5 Hcomm transport
@@ -77,14 +79,8 @@ public:
         if (rank == rankId_) {
             return (GM_ADDR)context_->localWindowsIn;
         }
-        // Cross-rank: HCCL mirrors the peer window into this device's relation
-        // table. A null nextDevicePtr (or a zero windowsIn) means the mapping
-        // was never published for that rank; callers must not dereference it.
         auto *relation = (__gm__ HcclRankRelationResV2 *)context_->remoteRes[rank].nextDevicePtr;
-        if (relation == nullptr) {
-            return nullptr;
-        }
-        return (GM_ADDR)relation->windowsIn;
+        return relation == nullptr ? (GM_ADDR)nullptr : (GM_ADDR)relation->windowsIn;
 #endif
     }
     __aicore__ inline GM_ADDR WindowIn(uint32_t rank) const
@@ -100,32 +96,17 @@ public:
             return (GM_ADDR)context_->localWindowsOut;
         }
         auto *relation = (__gm__ HcclRankRelationResV2 *)context_->remoteRes[rank].nextDevicePtr;
-        if (relation == nullptr) {
-            return nullptr;
-        }
-        return (GM_ADDR)relation->windowsOut;
+        return relation == nullptr ? (GM_ADDR)nullptr : (GM_ADDR)relation->windowsOut;
 #endif
     }
     __aicore__ inline uint64_t WinSizeBytes() const
     {
         return GetWinSize(context_);
     }
-    // True when a copy into this rank's window is legal. A3 resolves the peer
-    // window from remoteRes; a null nextDevicePtr or zero windowsIn is exactly
-    // the case that used to turn into an MTE write to address 0, so the send
-    // paths skip it (and trace it) instead of trapping.
-    // A5 has no direct peer mapping at all: only the local IPC buffer is
-    // addressable, every remote send goes through the hcomm channel.
-    __aicore__ inline bool PeerWindowUsable(uint32_t rank) const
-    {
-#ifdef __DAV_C310__
-        return rank == rankId_;
-#else
-        return WindowIn(rank) != nullptr;
-#endif
-    }
     // Debug helper: snapshot of a peer relation resource with a null guard, so a
     // missing remote entry reports 0 instead of faulting on the dereference.
+    // windowIn is the remote virtual address that PostRdmaSend puts into the
+    // WQE (plus the lane offset), not a locally writable address.
     __aicore__ inline void LoadPeerWindow(uint32_t rank, uint64_t &nextDevPtr, uint64_t &windowIn) const
     {
 #ifndef __DAV_C310__
@@ -155,7 +136,10 @@ public:
                                         AscendC::LocalTensor<uint32_t> &headUb, uint64_t timeoutCycles = 0U) const
     {
 #ifndef __DAV_C310__  // A3 AiRMA RDMA write
-        if (rdmaInfo_ == nullptr) {
+        // A null table means HCCL never published the QP descriptor; a null
+        // endpoint means the peer window was not mapped (a WQE with remote
+        // address 0 would corrupt the peer instead of signalling the fault).
+        if (rdmaInfo_ == nullptr || src == nullptr || dst == nullptr) {
             return false;
         }
         auto qpNum = rdmaInfo_->qpNum;
@@ -239,6 +223,32 @@ public:
         return PostRdmaSend(localFlag, remoteFlag, dstRank, sizeof(uint64_t), doorbellUb, headUb, timeoutCycles);
     }
 
+    // Debug helper: zero-dereference view of the AiRMA descriptor layout for
+    // dstRank. The base pointer is only dereferenced when it is non-null, so a
+    // missing transport context reports zeros instead of faulting.
+    __aicore__ inline void LoadQpDesc(uint32_t dstRank, uint64_t &infoPtr, uint32_t &qpNum, uint32_t &qpSize,
+                                      uint64_t &qpAddr) const
+    {
+#ifndef __DAV_C310__
+        infoPtr = reinterpret_cast<uint64_t>(rdmaInfo_);
+        qpNum = 0U;
+        qpSize = 0U;
+        qpAddr = 0U;
+        if (infoPtr != 0U) {
+            qpNum = rdmaInfo_->qpNum;
+            qpSize = rdmaInfo_->sizeOfAiRMAWQ;
+            qpAddr = reinterpret_cast<uint64_t>(rdmaInfo_->sqPtr) +
+                     static_cast<uint64_t>(dstRank) * static_cast<uint64_t>(qpNum) * static_cast<uint64_t>(qpSize);
+        }
+#else
+        (void)dstRank;
+        (void)infoPtr;
+        (void)qpNum;
+        (void)qpSize;
+        (void)qpAddr;
+#endif
+    }
+
     // Debug helper: raw binding of the HCCL context that carries the AiRMA
     // table, read without dereferencing a null context. The context is always
     // HcclOpResParam on 910_93, even on the AICPU domain. The three fields
@@ -263,6 +273,37 @@ public:
         (void)info;
         ctx = reinterpret_cast<uint64_t>(context_);
         dim = ctx != 0U ? GetRankDim(context_) : 0U;
+#endif
+    }
+
+    // Debug helper: snapshot of the AiRMA SQ flow-control words for dstRank.
+    // head is the producer index this kernel maintains; tail is advanced by the
+    // transport when WQEs complete. A frozen tail is what turns the queue-space
+    // spin inside PostRdmaSend into a hang.
+    __aicore__ inline void LoadQpState(uint32_t dstRank, uint32_t &head, uint32_t &tail, uint32_t &depth) const
+    {
+#ifndef __DAV_C310__
+        head = 0U;
+        tail = 0U;
+        depth = 0U;
+        if (rdmaInfo_ == nullptr) {
+            return;
+        }
+        const uint32_t qpNum = rdmaInfo_->qpNum;
+        auto *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_->sqPtr +
+                                          static_cast<uint64_t>(dstRank) * qpNum * rdmaInfo_->sizeOfAiRMAWQ);
+        auto *headAddr = (__gm__ uint32_t *)qp->headAddr;
+        auto *tailAddr = (__gm__ uint32_t *)qp->tailAddr;
+        cacheWriteThrough((__gm__ uint8_t *)headAddr, sizeof(uint64_t));
+        cacheWriteThrough((__gm__ uint8_t *)tailAddr, sizeof(uint64_t));
+        head = *headAddr;
+        tail = *tailAddr;
+        depth = qp->depth;
+#else
+        (void)dstRank;
+        head = 0U;
+        tail = 0U;
+        depth = 0U;
 #endif
     }
 

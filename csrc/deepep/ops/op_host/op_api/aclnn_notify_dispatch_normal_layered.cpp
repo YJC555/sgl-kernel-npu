@@ -35,9 +35,9 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
     // A5: tiling 声明 AlltoAll + AIV_ENGINE，通信控制面在 AIV 核上，服务端为 MTE。
     const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_MTE;
 #else
-    // A3: tiling 与出厂 notify_dispatch 一致（opType 8 + AlltoAll + AIV_ENGINE，
-    // 不拉起 AICPU），因此服务端必须是 MTE；设成 AICPU 会让 HCCL 按 AICPU 域准备
-    // 资源，kernel 读 remoteRes 拿到的跨节点窗口全为 0。
+    // A3: tiling 同样声明 AlltoAll + AIV_ENGINE，MC2 域由 AIV 引擎驱动，服务端选
+    // MTE（AIV_ENGINE 不会拉起 AICPU）。kernel 侧从 HcclOpResParam::aiRMAInfo 取
+    // QP/SQ/mem key 表，用 PostRdmaSend 下发 WQE 由网卡做 RDMA write。
     const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_MTE;
 #endif
     std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d server=%d\n", static_cast<int>(soc),
