@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A3 分层 notify：QP 表获取改造逐行解析</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --card:#ffffff; --text:#1f2328; --muted:#59636e;
+    --border:#d8dee4; --accent:#1f6feb; --accent-soft:#ddf4ff;
+    --green:#1a7f37; --green-soft:#dafbe1;
+    --orange:#9a6700; --orange-soft:#fff8c5;
+    --red:#cf222e; --red-soft:#ffebe9;
+    --purple:#8250df; --purple-soft:#fbefff;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; padding:36px 20px 80px; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;
+    line-height:1.7; font-size:15px;
+  }
+  .wrap{max-width:1120px;margin:0 auto}
+  header{margin-bottom:24px}
+  h1{font-size:29px;line-height:1.32;margin:0 0 10px;letter-spacing:-.3px}
+  .sub{color:var(--muted);font-size:15px;margin:0 0 14px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--muted)}
+  .meta span{background:var(--card);border:1px solid var(--border);border-radius:999px;padding:3px 12px}
+  .callout{border-radius:10px;padding:14px 18px;font-size:14px;margin:18px 0}
+  .c-blue{background:var(--accent-soft);border:1px solid #b6e3ff}
+  .c-green{background:var(--green-soft);border:1px solid #aceebb}
+  .c-orange{background:var(--orange-soft);border:1px solid #f2d97a}
+  .callout b{font-weight:600}
+  nav.toc{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:16px 22px;margin:20px 0 34px;
+  }
+  nav.toc h3{margin:0 0 10px;font-size:14px;letter-spacing:.4px;color:var(--muted);text-transform:uppercase}
+  nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:36px}
+  nav.toc li{margin:4px 0;font-size:14px;break-inside:avoid}
+  nav.toc a{color:var(--accent);text-decoration:none}
+  nav.toc a:hover{text-decoration:underline}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border);scroll-margin-top:14px}
+  h3{font-size:16.5px;margin:26px 0 10px}
+  h4{font-size:15px;margin:20px 0 8px;color:var(--text)}
+  p{margin:10px 0}
+  ul,ol{padding-left:24px}
+  li{margin:5px 0}
+  code.inl{
+    background:var(--gray-soft,#eaeef2);padding:1.5px 6px;border-radius:5px;
+    font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:13px;
+  }
+  pre{
+    background:#0d1117;color:#e6edf3;border-radius:10px;padding:16px 18px;overflow-x:auto;
+    font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+    font-size:13px;line-height:1.62;margin:12px 0;
+  }
+  pre .c{color:#8b949e}
+  pre .k{color:#ff7b72}
+  pre .s{color:#a5d6ff}
+  pre .n{color:#79c0ff}
+  pre .hi{color:#ffd33d}
+  pre .g{color:#7ee787}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;background:var(--card)}
+  th,td{border:1px solid var(--border);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:#f0f3f6;font-weight:600;white-space:nowrap}
+  td code,th code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;background:#eef1f4;padding:1px 5px;border-radius:4px}
+  .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  .t-our{background:var(--accent-soft);color:var(--accent);border-color:#b6e3ff}
+  .t-ref{background:var(--purple-soft);color:var(--purple);border-color:#e2ccff}
+  .t-why{background:var(--green-soft);color:var(--green);border-color:#aceebb}
+  .t-warn{background:var(--orange-soft);color:var(--orange);border-color:#f2d97a}
+  .flow{
+    background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:18px 20px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:13px;line-height:1.75;overflow-x:auto;white-space:pre;color:#24292f;
+  }
+  .kv{display:grid;grid-template-columns:190px 1fr;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin:14px 0}
+  .kv div{padding:9px 14px;border-bottom:1px solid var(--border);font-size:14px;background:var(--card)}
+  .kv div:nth-child(odd){background:#f0f3f6;font-weight:600}
+  .kv div:nth-last-child(-n+2){border-bottom:none}
+  .back{display:inline-block;margin-top:40px;font-size:14px;color:var(--accent);text-decoration:none}
+  footer{margin-top:36px;font-size:13px;color:var(--muted);text-align:center}
+  @media (max-width:760px){
+    body{padding:22px 14px 56px}
+    h1{font-size:23px}
+    nav.toc ol{columns:1}
+    .kv{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>A3 分层 notify：QP 表获取改造逐行解析</h1>
+  <p class="sub">从“第一版拿不到 <code class="inl">aiRMAInfo</code>”到“按 arch22 补齐 MC2 CC-Tiling 后拿到 QP 表”，逐处给出改动、作用、以及 arch22 的原始出处行号。</p>
+  <div class="meta">
+    <span>本仓库基线：81454d1（a5_layered 第一版）</span>
+    <span>改造提交：4489078</span>
+    <span>方案 B 移除：17fcc66</span>
+    <span>参考实现：ops-transformer / arch22</span>
+  </div>
+</header>
+
+<div class="callout c-blue">
+  <b>阅读方式：</b>每一节都按同一结构展开——<span class="tag t-our">我们的代码</span> 贴出当前代码与行号，
+  <span class="tag t-ref">arch22 出处</span> 给出模拟来源的“文件 + 行号”，
+  <span class="tag t-why">作用</span> 说明这行解决了什么问题，以及“不加会怎样”。所有行号以本文写作时的仓库内容为准。
+</div>
+
+<nav class="toc">
+  <h3>目录</h3>
+  <ol>
+    <li><a href="#s0">结论速览</a></li>
+    <li><a href="#s1">QP 表到底是什么</a></li>
+    <li><a href="#s2">六处改动与出处总表</a></li>
+    <li><a href="#s3">执行顺序：一次 kernel 从 tiling 到发送</a></li>
+    <li><a href="#s4">改动 1：host SetComm 声明 BatchWrite</a></li>
+    <li><a href="#s5">改动 2：host SetAicpuBlockDim</a></li>
+    <li><a href="#s6">改动 3：TilingData 与 offsetof 的 ABI</a></li>
+    <li><a href="#s7">改动 4：kernel InitV2 / SetCcTilingV2 / Finalize</a></li>
+    <li><a href="#s8">改动 5：CommAdapter 读取 aiRMAInfo</a></li>
+    <li><a href="#s9">改动 6：PostRdmaSend 消费 QP 表</a></li>
+    <li><a href="#s10">调试探针：LoadQpDesc / LoadQpState</a></li>
+    <li><a href="#s11">为什么改前不行、改后可行</a></li>
+    <li><a href="#s12">A5 为什么保持原样</a></li>
+    <li><a href="#s13">验证清单与失败模式</a></li>
+    <li><a href="#s14">行号索引</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="s0">0. 结论速览</h2>
+
+<ul>
+  <li>第一版（<code class="inl">81454d1</code>）把 A3 当成 A5 写：host 用 <code class="inl">AlltoAll + AIV_ENGINE</code> 声明通信，kernel 从不登记 CC-Tiling。HCCL 因此不会为 A3 准备单边写资源，<code class="inl">aiRMAInfo</code> 恒为 0。</li>
+  <li>本次改造只做一件事：<b>把“声明 → 登记”这条 MC2 流程补齐</b>，让 HCCL 在 AICPU 上建好传输并回填 QP 表。发送代码本身第一版就写好了，改前只是拿不到表。</li>
+  <li>host 三件事：<code class="inl">opType=18（BatchWrite）</code>、<code class="inl">algConfig=level1:hierarchy / level0:fullmesh</code>、<code class="inl">SetAicpuBlockDim(6 / 1)</code>。出处：arch22 host <code class="inl">L130–136 / L784 / L792–810</code>。</li>
+  <li>kernel 两件事：<code class="inl">Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code> + <code class="inl">InitV2</code> + <code class="inl">SetCcTilingV2(offsetof(...))</code>，结束时 <code class="inl">Finalize()</code>。出处：arch22 kernel <code class="inl">L285 / L291–303 / L1587</code>。</li>
+  <li>A5 保持 <code class="inl">AlltoAll + AIV_ENGINE</code> 不变：A5 的通信走 <code class="inl">adv_api/hcomm</code> 通道，不读 <code class="inl">aiRMAInfo</code>，强行改成 BatchWrite 反而破坏现有路径。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s1">1. QP 表到底是什么</h2>
+
+<p><code class="inl">aiRMAInfo</code> 是 HCCL 放在 <code class="inl">HcclOpParam</code>（group 0 的通信上下文）里的一个指针，指向一张“单边写资源表”。字段与用途：</p>
+
+<table>
+  <thead><tr><th>字段</th><th>含义</th><th>在发送时怎么用</th></tr></thead>
+  <tbody>
+    <tr><td><code>qpNum</code></td><td>每个目的 rank 分配了几个 QP</td><td>地址步长 = <code>qpNum × sizeOfAiRMAWQ</code></td></tr>
+    <tr><td><code>sqPtr</code></td><td>Send Queue 数组首地址</td><td>按目的 rank 偏移后得到 <code>HcclAiRMAWQ</code></td></tr>
+    <tr><td><code>sizeOfAiRMAWQ</code></td><td>单个 WQ 结构大小</td><td>与 <code>qpNum</code> 一起算 strided 下标</td></tr>
+    <tr><td><code>memPtr</code></td><td>每个 rank 的内存描述数组</td><td>取 <code>REMOTE_INPUT</code> 的 rkey、<code>LOCAL_OUTPUT</code> 的 lkey</td></tr>
+    <tr><td><code>sizeOfAiRMAMem</code></td><td>单个内存描述大小</td><td>同上，算 <code>memPtr</code> 的步长</td></tr>
+    <tr><td><code>curRankId</code></td><td>当前 rank</td><td>调试/校验用</td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-orange">
+  <b>关键认识：</b>这张表不是 host 填的，也不是算子自己填的。它由 HCCL 在 AICPU 侧根据 host 的 CC-Tiling 声明创建传输后写回。算子能做的只有两件事：<b>声明清楚要什么通信</b>（host），<b>把声明登记给 HCCL</b>（kernel）。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s2">2. 六处改动与出处总表</h2>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>位置</th><th>改动</th><th>arch22 出处</th><th>作用</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>[op_host/notify_dispatch_normal_layered_tiling.cc](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_host/notify_dispatch_normal_layered_tiling.cc#L87-L95) L87–95</td>
+      <td>A3 分支改为 <code>opType=18</code> + <code>BatchWrite=level1:hierarchy</code> / <code>level0:fullmesh</code>；去掉 <code>SetCommEngine(AIV_ENGINE)</code></td>
+      <td>arch22 host <code>L130–136</code>、<code>L792–810</code></td>
+      <td>让 HCCL 按“单边批量写”准备 QP</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>[同文件](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_host/notify_dispatch_normal_layered_tiling.cc#L301-L305) L301–305</td>
+      <td>新增 <code>SetAicpuBlockDim(跨机 ? 6 : 1)</code></td>
+      <td>arch22 host <code>L784</code></td>
+      <td>启动 AICPU 侧 HCCL 控制面</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>[op_kernel/notify_dispatch_normal_layered_tiling.h](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_kernel/notify_dispatch_normal_layered_tiling.h#L5-L9) L5–9</td>
+      <td>TilingData 头部固定为 <code>Mc2InitTiling</code> + <code>Mc2CcTiling</code></td>
+      <td>arch22 同名结构同样以这两块开头</td>
+      <td>保证 <code>InitV2(&amp;data)</code> 与 <code>offsetof</code> 的 ABI 正确</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>[op_kernel/notify_dispatch_normal_layered.cpp](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_kernel/notify_dispatch_normal_layered.cpp#L1309-L1319) L1309–1319、L1351–1355</td>
+      <td>新增 <code>Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code>、<code>InitV2</code>、<code>SetCcTilingV2</code>、<code>Finalize</code></td>
+      <td>arch22 kernel <code>L285</code>、<code>L291–303</code>、<code>L1587</code></td>
+      <td>把 CC-Tiling 交给 HCCL，触发建传输与回填</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>[cam_moe_layered_comm.h](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_kernel/cam_moe_layered_comm.h#L33-L36) L33–36</td>
+      <td>（第一版已有）A3 读 <code>context_-&gt;aiRMAInfo</code></td>
+      <td>arch22 kernel <code>L303</code></td>
+      <td>拿到表指针；改前该字段为 0</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>[同文件](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_kernel/cam_moe_layered_comm.h#L116-L174) L116–174</td>
+      <td>（第一版已有）<code>PostRdmaSend</code> 构造 WQE 并 ring doorbell</td>
+      <td>arch22 kernel <code>L473–552</code></td>
+      <td>真正使用 QP 表发送数据</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>其中 5、6 不是本次新增，但它们是“表拿到之后怎么用”的完整闭环，本文一并给出对照，避免只看半条链。</p>
+
+<!-- ============================================================ -->
+<h2 id="s3">3. 执行顺序：一次 kernel 从 tiling 到发送</h2>
+
+<div class="flow">host：NotifyTiling()
+  ├─ 校验属性 / 计算窗口与 plan 布局
+  ├─ SetComm(d, group, crossServer)        ← 改动 1：声明 BatchWrite
+  ├─ SetAicpuBlockDim(6 / 1)               ← 改动 2：分配 AICPU 控制面
+  ├─ SetBlockDim(aivNum) / SetTilingKey(23)
+  └─ 把 mc2InitTiling / mc2CcTiling 写进 TilingData
+
+device：kernel funcEntry（TILING_KEY_IS(23)）
+  ├─ GET_TILING_DATA_WITH_STRUCT(...)
+  ├─ contextGM0 = GetHcclContext&lt;HCCL_GROUP_ID_0&gt;()
+  ├─ Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt; hccl
+  ├─ hccl.InitV2(contextGM0, &amp;data)          ← 改动 4：绑定通信域
+  ├─ hccl.SetCcTilingV2(offsetof(..., mc2CcTiling))  ← 改动 4：登记通信参数
+  │     └─ HCCL 在 AICPU 建传输，把 sqPtr/qpNum/memPtr 回填进 aiRMAInfo
+  ├─ op.Init(...)
+  │     └─ CommAdapter::Init: rdmaInfo_ = context_-&gt;aiRMAInfo   ← 改动 5
+  ├─ op.Process()
+  │     └─ stage 6: PostRdmaSend 读 qpNum/sqPtr/memPtr，写 WQE 并 ring doorbell ← 改动 6
+  └─ hccl.Finalize()                         ← 改动 4：释放 AICPU 客户端</div>
+
+<div class="callout c-green">
+  <b>顺序不可交换：</b><code class="inl">SetCcTilingV2</code> 必须在 <code class="inl">op.Init</code> 之前。因为 <code class="inl">op.Init</code> 内部会把 <code class="inl">aiRMAInfo</code> 缓存成成员 <code class="inl">rdmaInfo_</code>，晚一步就只能缓存到 0。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s4">4. 改动 1：host SetComm 声明 BatchWrite</h2>
+
+<h3>4.1 第一版（81454d1）怎么写的</h3>
+
+<pre><span class="c">// 81454d1: csrc/deepep/ops/op_host/notify_dispatch_normal_layered_tiling.cc（节选）</span>
+AscendC::Mc2CcTilingConfig c(g, <span class="hi">8U</span>, <span class="s">"AlltoAll=level0:fullmesh;level1:pairwise"</span>);
+c.<span class="hi">SetCommEngine</span>(mc2tiling::AIV_ENGINE);
+c.GetTiling(d-&gt;mc2InitTiling);
+c.GetTiling(d-&gt;mc2CcTiling);</pre>
+
+<p>这套写法是给 A5 准备的：A5 有 AIV 通信引擎，AlltoAll 声明即可。A3 上用它会出两个问题：</p>
+<ul>
+  <li><code class="inl">8U</code>（AlltoAll）不是单边写语义，HCCL 不导出 SQ/QP；</li>
+  <li><code class="inl">AIV_ENGINE</code> 在 A3 不存在，HCCL 直接返回 <code class="inl">HCCL_E_PARA(1)</code>（这就是之前 <code class="inl">fail step=engine-get code=1</code> 的来源）。</li>
+</ul>
+
+<h3>4.2 现在（4489078）</h3>
+
+<pre><span class="c">// csrc/deepep/ops/op_host/notify_dispatch_normal_layered_tiling.cc  L77–96</span>
+<span class="k">void</span> SetComm(NotifyDispatchNormalLayeredTilingData *d, <span class="k">const</span> std::string &amp;g, <span class="k">bool</span> crossServer)
+{
+<span class="k">#ifdef</span> __DAV_C310__
+    <span class="c">// A5：保持第一版写法不动</span>
+    AscendC::Mc2CcTilingConfig c(g, <span class="n">8U</span>, <span class="s">"AlltoAll=level0:fullmesh;level1:pairwise"</span>);
+    c.SetCommEngine(mc2tiling::AIV_ENGINE);
+    c.GetTiling(d-&gt;mc2InitTiling);
+    c.GetTiling(d-&gt;mc2CcTiling);
+<span class="k">#else</span>
+    <span class="c">// A3：改成单边批量写</span>
+    <span class="k">const</span> std::string algConfig = crossServer ? <span class="s">"BatchWrite=level1:hierarchy"</span>
+                                              : <span class="s">"BatchWrite=level0:fullmesh"</span>;
+    AscendC::Mc2CcTilingConfig c(g, <span class="hi">18U</span>, algConfig);
+    c.GetTiling(d-&gt;mc2InitTiling);
+    c.GetTiling(d-&gt;mc2CcTiling);
+<span class="k">#endif</span>
+}</pre>
+
+<h3>4.3 逐行作用</h3>
+
+<table>
+  <thead><tr><th>行</th><th>内容</th><th>作用 / 不加会怎样</th></tr></thead>
+  <tbody>
+    <tr><td>L91</td><td><code>crossServer ? "BatchWrite=level1:hierarchy" : "BatchWrite=level0:fullmesh"</code></td>
+      <td><code>level0</code>=机内、<code>level1</code>=跨机；<code>hierarchy</code> 表示分层，只连对端<b>同号卡</b>。<code>fullmesh</code> 会要求两两建链，跨 16+16 卡时资源对不上，layered 拓扑也不需要。</td></tr>
+    <tr><td>L92</td><td><code>Mc2CcTilingConfig c(g, 18U, algConfig)</code></td>
+      <td><code>18U</code> 是 <code>HCCL_CMD_BATCH_WRITE</code>。只有这个 opType 才会让 HCCL 准备“单边写”资源并导出 QP 表。用 8U（AlltoAll）拿不到。</td></tr>
+    <tr><td>L93–94</td><td><code>GetTiling(d-&gt;mc2InitTiling)</code> / <code>GetTiling(d-&gt;mc2CcTiling)</code></td>
+      <td>分别生成初始化阶段和通信阶段参数，写进 TilingData。kernel 侧要靠这两块登记，缺一块 HCCL 无法建传输。</td></tr>
+    <tr><td>—</td><td>不调用 <code>SetCommEngine</code></td>
+      <td>A3 默认就是 AICPU 上的 CC 引擎；显式指定 AIV 引擎会返回 <code>HCCL_E_PARA(1)</code>。</td></tr>
+  </tbody>
+</table>
+
+<h3>4.4 arch22 出处</h3>
+
+<pre><span class="c">// ops-transformer: mc2/moe_distribute_dispatch_v2/op_host/op_tiling/arch22/
+//                moe_distribute_dispatch_v2_tiling_arch22.cpp  L130–136</span>
+<span class="k">static</span> std::string MoeDistributeCombineA2GetAlgConfig(<span class="k">int32_t</span> epWorldSize, <span class="k">bool</span> isLayered)
+{
+    <span class="k">if</span> (epWorldSize &lt;= RANK_NUM_PER_NODE_A2) {
+        <span class="k">return</span> <span class="s">"BatchWrite=level0:fullmesh"</span>;
+    }
+    <span class="k">return</span> isLayered ? <span class="s">"BatchWrite=level1:hierarchy"</span> : <span class="s">"BatchWrite=level1:fullmesh"</span>;
+}</pre>
+
+<pre><span class="c">// 同文件  L792–810（SetA2CommunicationConfig）</span>
+std::string algConfig = MoeDistributeCombineA2GetAlgConfig(*epWorldSizePtr, isLayered);
+AscendC::Mc2CcTilingConfig mc2CcTilingConfig(group, <span class="k">static_cast</span>&lt;<span class="k">uint32_t</span>&gt;(<span class="hi">18</span>), algConfig);
+OP_TILING_CHECK(mc2CcTilingConfig.GetTiling(tilingData-&gt;mc2InitTiling) != <span class="n">0</span>, ...);
+OP_TILING_CHECK(mc2CcTilingConfig.GetTiling(tilingData-&gt;mc2CcTiling) != <span class="n">0</span>, ...);</pre>
+
+<p>对照：我们把 <code class="inl">epWorldSize &lt;= 8</code> 换成了 <code class="inl">servers &lt;= 1</code>（A3 每机 16 卡，语义仍是“是否跨机”）；<code class="inl">18</code> 与两个 <code class="inl">GetTiling</code> 完全一致。</p>
+
+<!-- ============================================================ -->
+<h2 id="s5">5. 改动 2：host SetAicpuBlockDim</h2>
+
+<pre><span class="c">// csrc/deepep/ops/op_host/notify_dispatch_normal_layered_tiling.cc  L300–308</span>
+SetComm(d, std::string(g), servers &gt; <span class="n">1U</span>);
+<span class="k">#ifndef</span> __DAV_C310__
+    <span class="c">// A3 的通信控制面在 AICPU：跨机需要完整的 AICPU 服务块，单机 1 个即可</span>
+    c-&gt;<span class="hi">SetAicpuBlockDim</span>(servers &gt; <span class="n">1U</span> ? mc2tiling::<span class="hi">AICPU_NUM_BLOCKS_A2</span> : <span class="n">1U</span>);
+<span class="k">#endif</span>
+c-&gt;SetBlockDim(l.aivNum);
+c-&gt;SetScheduleMode(<span class="n">1</span>);
+c-&gt;SetTilingKey(<span class="n">23U</span>);</pre>
+
+<div class="kv">
+  <div>为什么需要</div><div>HCCL 的 A3 客户端跑在 AICPU 上。不给 AICPU 分配 block，kernel 里的 <code class="inl">InitV2</code> 没有可用的服务进程去执行，QP 表不会有人填。</div>
+  <div>为什么是 6</div><div><code class="inl">AICPU_NUM_BLOCKS_A2 = 6</code> 是 HCCL 跨机场景约定的 AICPU 服务块数量；单机不需要跨机调度，1 个即可。</div>
+  <div>不加会怎样</div><div>典型表现是 <code class="inl">info != 0</code> 但 <code class="inl">num == 0</code>，或者 <code class="inl">head</code> 增长而 <code class="inl">tail</code> 不动（队列没人消费）。</div>
+  <div>与 A5 的区别</div><div>A5 没有 AICPU 控制面，这段用 <code class="inl">#ifndef __DAV_C310__</code> 整体跳过。</div>
+</div>
+
+<h3>arch22 出处</h3>
+
+<pre><span class="c">// arch22  moe_distribute_dispatch_v2_tiling_arch22.cpp  L784</span>
+context-&gt;SetAicpuBlockDim(info.epWorldSize &gt; RANK_NUM_PER_NODE_A2
+                              ? mc2tiling::AICPU_NUM_BLOCKS_A2 : <span class="n">1</span>);</pre>
+
+<p>我们只是把判断条件从“总 rank 数 &gt; 单机卡数”换成“server 数 &gt; 1”，含义相同，都是“是否跨机”。</p>
+
+<!-- ============================================================ -->
+<h2 id="s6">6. 改动 3：TilingData 与 offsetof 的 ABI</h2>
+
+<pre><span class="c">// csrc/deepep/ops/op_kernel/notify_dispatch_normal_layered_tiling.h  L5–9</span>
+<span class="k">struct</span> NotifyDispatchNormalLayeredTilingData {
+    <span class="hi">Mc2InitTiling mc2InitTiling;</span>   <span class="c">// 必须在偏移 0</span>
+    <span class="hi">Mc2CcTiling mc2CcTiling;</span>       <span class="c">// kernel 用 offsetof 告诉 HCCL</span>
+    CamMoeLayeredInfo layered;
+};</pre>
+
+<ul>
+  <li><code class="inl">InitV2(contextGM0, &amp;data)</code> 传的是<b>结构体首地址</b>，HCCL 默认从偏移 0 读 <code class="inl">mc2InitTiling</code>。所以 <code class="inl">mc2InitTiling</code> 必须是第一个成员。</li>
+  <li><code class="inl">SetCcTilingV2(offsetof(..., mc2CcTiling))</code> 显式告诉 HCCL 第二块在哪。用 <code class="inl">offsetof</code> 而不是写死字节数，结构体增删成员时不会错位。</li>
+  <li>host 端写 <code class="inl">d-&gt;mc2InitTiling</code> / <code class="inl">d-&gt;mc2CcTiling</code>，kernel 端按同一结构体读，这是 host/device 之间的 ABI 契约。</li>
+</ul>
+
+<div class="callout c-orange">
+  <b>常见错误：</b>把 <code class="inl">mc2CcTiling</code> 放到结构体中间却在 kernel 里写死偏移，或 host 与 kernel 用了两个不同的结构体定义。表现同样是 <code class="inl">aiRMAInfo=0</code> 或通信参数乱码。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s7">7. 改动 4：kernel InitV2 / SetCcTilingV2 / Finalize</h2>
+
+<pre><span class="c">// csrc/deepep/ops/op_kernel/notify_dispatch_normal_layered.cpp  L1300–1319</span>
+<span class="k">if</span> (TILING_KEY_IS(<span class="n">23</span>)) {
+    GET_TILING_DATA_WITH_STRUCT(NotifyDispatchNormalLayeredTilingData, data, tiling);
+<span class="k">#ifndef</span> __DAV_C310__
+    <span class="k">auto</span> contextGM0 = AscendC::GetHcclContext&lt;AscendC::HCCL_GROUP_ID_0&gt;();
+    Hccl&lt;<span class="hi">HCCL_SERVER_TYPE_AICPU</span>&gt; hccl;                       <span class="c">// ①</span>
+    hccl.<span class="hi">InitV2</span>(contextGM0, &amp;data);                        <span class="c">// ②</span>
+    hccl.<span class="hi">SetCcTilingV2</span>(offsetof(NotifyDispatchNormalLayeredTilingData,
+                                  mc2CcTiling));                  <span class="c">// ③</span>
+<span class="k">#endif</span>
+    ...
+    op.Init(..., doorbell, head, ...);   <span class="c">// ④ 这里读 aiRMAInfo</span>
+    op.Process();
+<span class="k">#ifndef</span> __DAV_C310__
+    hccl.<span class="hi">Finalize</span>();                                          <span class="c">// ⑤</span>
+<span class="k">#endif</span>
+}</pre>
+
+<table>
+  <thead><tr><th>标记</th><th>语句</th><th>作用</th><th>不加会怎样</th></tr></thead>
+  <tbody>
+    <tr><td>①</td><td><code>Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt;</code></td><td>声明通信客户端跑在 AICPU 上（A3 唯一可用的 server type）</td><td>用默认/AIV 类型在 A3 编不过或运行时返回参数错误</td></tr>
+    <tr><td>②</td><td><code>InitV2(contextGM0, &amp;data)</code></td><td>把本算子绑定到 group 0 通信域，并把整块 tiling 交给 HCCL</td><td>HCCL 不知道这个 op 存在，后续不会建传输</td></tr>
+    <tr><td>③</td><td><code>SetCcTilingV2(offsetof(...))</code></td><td>登记 <code>mc2CcTiling</code> 的位置；<b>触发建传输并回填 <code>aiRMAInfo</code></b></td><td><code>aiRMAInfo</code> 保持 0，<code>PostRdmaSend</code> 空指针</td></tr>
+    <tr><td>④</td><td><code>op.Init(...)</code></td><td>缓存 <code>rdmaInfo_</code>、初始化 rank/窗口</td><td>—（顺序必须在 ③ 之后）</td></tr>
+    <tr><td>⑤</td><td><code>Finalize()</code></td><td>释放 AICPU 侧客户端，供下一个算子复用</td><td>连续跑多个 op 时可能绑定冲突</td></tr>
+  </tbody>
+</table>
+
+<h3>arch22 出处</h3>
+
+<pre><span class="c">// ops-transformer: mc2/moe_distribute_dispatch_v2/op_kernel/arch22/
+//                moe_distribute_dispatch_a2_layered.h</span>
+<span class="c">// L285</span>
+Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt; hccl_;
+
+<span class="c">// L291–303  InitCommTiling()</span>
+<span class="k">template</span> &lt;TemplateMC2TypeA2layeredClass&gt;
+__aicore__ <span class="k">inline void</span> MoeDistributeDispatchA2Layered&lt;...&gt;::InitCommTiling(
+    TPipe* pipe, GM_ADDR tilingGM, GM_ADDR contextGM0)
+{
+    tpipe_ = pipe;
+    GET_TILING_DATA_WITH_STRUCT(MoeDistributeDispatchA2TilingData, tilingData, tilingGM);
+
+    hccl_.<span class="hi">InitV2</span>(contextGM0, &amp;tilingData);                       <span class="c">// L298</span>
+    hccl_.<span class="hi">SetCcTilingV2</span>(offsetof(MoeDistributeDispatchA2TilingData,
+                                      mc2CcTiling));               <span class="c">// L299</span>
+
+    rankId_ = tilingData.moeDistributeDispatchInfo.epRankId;
+    serverId_ = rankId_ / SERVER_RANK_SIZE;
+    qp_info_ = (__gm__ HcclAiRMAInfo*)(((__gm__ HcclA2CombineOpParam*)contextGM0)
+                                          -&gt;<span class="hi">aiRMAInfo</span>);        <span class="c">// L303</span>
+    ...
+}
+
+<span class="c">// L1587（析构/结束路径）</span>
+hccl_.Finalize();</pre>
+
+<p>我们的实现与它一一对应：<code class="inl">&amp;data</code> ↔ <code class="inl">&amp;tilingData</code>，<code class="inl">offsetof(NotifyDispatchNormalLayeredTilingData, mc2CcTiling)</code> ↔ <code class="inl">offsetof(MoeDistributeDispatchA2TilingData, mc2CcTiling)</code>。</p>
+
+<!-- ============================================================ -->
+<h2 id="s8">8. 改动 5：CommAdapter 读取 aiRMAInfo</h2>
+
+<pre><span class="c">// csrc/deepep/ops/op_kernel/cam_moe_layered_comm.h  L28–45</span>
+__aicore__ <span class="k">inline void</span> Init(<span class="k">uint32_t</span> rankId, GM_ADDR roceContext,
+                        AscendC::LocalTensor&lt;<span class="k">uint8_t</span>&gt; &amp;hcommUb, <span class="k">bool</span> isHybridDeployment = <span class="k">false</span>)
+{
+    rankId_ = rankId;
+    context_ = (__gm__ HcclOpParam *)AscendC::GetHcclContext&lt;AscendC::HCCL_GROUP_ID_0&gt;();
+<span class="k">#ifndef</span> __DAV_C310__  <span class="c">// A3 AiRMA transport</span>
+    rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_-&gt;<span class="hi">aiRMAInfo</span>;   <span class="c">// L35</span>
+    (<span class="k">void</span>)roceContext;
+<span class="k">#else</span>                   <span class="c">// A5 Hcomm transport</span>
+    rdmaContext_ = (__gm__ CamMoeLayeredCommContext *)roceContext;
+    ...
+<span class="k">#endif</span>
+}</pre>
+
+<ul>
+  <li>这段第一版就有，不是本次新增；区别是改前 <code class="inl">aiRMAInfo</code> 为 0，改后有效。</li>
+  <li>必须是同一个 group：kernel 入口用 <code class="inl">HCCL_GROUP_ID_0</code> 登记，这里也必须用 <code class="inl">HCCL_GROUP_ID_0</code> 读取，否则读到的是另一个上下文。</li>
+  <li><b>类型差异：</b>arch22 把 <code class="inl">contextGM0</code> 转成 <code class="inl">HcclA2CombineOpParam*</code>，我们用 <code class="inl">HcclOpParam*</code>。两者在 <code class="inl">aiRMAInfo</code> 字段上的布局一致，但这属于对 HCCL 头文件的 ABI 依赖：升级 CANN 后如果字段偏移变化，这里要跟着改。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s9">9. 改动 6：PostRdmaSend 消费 QP 表</h2>
+
+<h3>9.1 我们的实现</h3>
+
+<pre><span class="c">// csrc/deepep/ops/op_kernel/cam_moe_layered_comm.h  L116–174（节选）</span>
+<span class="k">auto</span> qpNum = rdmaInfo_-&gt;<span class="hi">qpNum</span>;                                   <span class="c">// L121</span>
+<span class="k">auto</span> *qp = (__gm__ HcclAiRMAWQ *)(rdmaInfo_-&gt;<span class="hi">sqPtr</span> +
+             dstRank * qpNum * rdmaInfo_-&gt;<span class="hi">sizeOfAiRMAWQ</span>);          <span class="c">// L122–123</span>
+
+<span class="k">auto</span> *headAddr = (__gm__ <span class="k">uint32_t</span> *)qp-&gt;headAddr;               <span class="c">// L124</span>
+<span class="k">auto</span> *tailAddr = (__gm__ <span class="k">uint32_t</span> *)qp-&gt;tailAddr;               <span class="c">// L125</span>
+<span class="k">while</span> (<span class="k">true</span>) {                                                <span class="c">// L130–137 等空位</span>
+    <span class="k">if</span> (head - *tailAddr &lt; qp-&gt;depth - <span class="n">1U</span>) <span class="k">break</span>;
+    ...
+}
+
+<span class="k">auto</span> *wqe = (__gm__ <span class="k">uint8_t</span> *)(qp-&gt;bufAddr + qp-&gt;wqeSize * (head % qp-&gt;depth));  <span class="c">// L138</span>
+<span class="k">const</span> <span class="k">uint64_t</span> ownBit = (head &gt;&gt; <span class="n">15U</span>) &amp; <span class="n">1U</span>;                  <span class="c">// L139</span>
+*(__gm__ <span class="k">uint32_t</span> *)(wqe)      = <span class="n">3U</span> | (((~ownBit) &lt;&lt; <span class="n">7U</span>) &amp; (<span class="n">1U</span> &lt;&lt; <span class="n">7U</span>)) | (<span class="n">1U</span> &lt;&lt; <span class="n">8U</span>);
+*(__gm__ <span class="k">uint32_t</span> *)(wqe + <span class="n">4U</span>)  = bytes;
+*(__gm__ <span class="k">uint32_t</span> *)(wqe + <span class="n">12U</span>) = <span class="n">1U</span> &lt;&lt; <span class="n">24U</span>;
+<span class="c">// 远端 rkey</span>
+<span class="k">auto</span> *remoteKey = (__gm__ MemDetails1 *)(remoteMem-&gt;memDetailPtr +
+                   remoteMem-&gt;sizeOfMemDetails *
+                   <span class="k">static_cast</span>&lt;<span class="k">uint32_t</span>&gt;(HcclAiRMAMemType::<span class="hi">REMOTE_INPUT</span>));
+*(__gm__ <span class="k">uint32_t</span> *)(wqe + <span class="n">20U</span>) = remoteKey-&gt;key;                  <span class="c">// L150</span>
+*(__gm__ <span class="k">uint64_t</span> *)(wqe + <span class="n">24U</span>) = <span class="k">reinterpret_cast</span>&lt;<span class="k">uint64_t</span>&gt;(dst); <span class="c">// L151</span>
+<span class="c">// 本地 lkey + 源地址</span>
+*(__gm__ <span class="k">uint32_t</span> *)(sge) = bytes;
+*(__gm__ <span class="k">uint32_t</span> *)(sge + <span class="k">sizeof</span>(<span class="k">uint32_t</span>)) = localKey-&gt;key;      <span class="c">// L159</span>
+*(__gm__ <span class="k">uint64_t</span> *)(sge + <span class="n">2U</span> * <span class="k">sizeof</span>(<span class="k">uint32_t</span>)) =
+    <span class="k">reinterpret_cast</span>&lt;<span class="k">uint64_t</span>&gt;(src);                          <span class="c">// L160</span>
+
+cacheWriteThrough(wqe, ...);                                     <span class="c">// L161 写穿 cache</span>
+++head;
+<span class="k">uint64_t</span> db = qp-&gt;wqn | ((head % <span class="n">65536ULL</span>) &lt;&lt; <span class="n">32U</span>) |
+              (<span class="k">static_cast</span>&lt;<span class="k">uint64_t</span>&gt;(qp-&gt;sl) &lt;&lt; <span class="n">48U</span>);            <span class="c">// L164</span>
+dbGm.SetGlobalBuffer((__gm__ <span class="k">uint64_t</span> *)qp-&gt;dbAddr);
+DataCopyPad(dbGm, doorbellUb, {<span class="n">1U</span>, <span class="k">sizeof</span>(<span class="k">uint64_t</span>), <span class="n">0U</span>, <span class="n">0U</span>, <span class="n">0U</span>});  <span class="c">// L169</span>
+headUb.SetValue(<span class="n">0</span>, (<span class="k">uint32_t</span>)head);                            <span class="c">// L171</span>
+headGm.SetGlobalBuffer(headAddr);
+DataCopyPad(headGm, headUb, ...);</pre>
+
+<h3>9.2 与 arch22 逐段对应</h3>
+
+<table>
+  <thead><tr><th>我们的行</th><th>做的事</th><th>arch22 对应</th></tr></thead>
+  <tbody>
+    <tr><td>L121–123</td><td>按 <code>dstRank</code> 定位 QP</td><td>L477–480，表达式完全相同：<code>sqPtr + destRankId * qpNum * sizeOfAiRMAWQ</code></td></tr>
+    <tr><td>L124–137</td><td>读 head/tail，等队列空位</td><td>L486–491 <code>WaitRdmaQueue(qp_ctx_entry)</code></td></tr>
+    <tr><td>L138–139</td><td>算 WQE 地址与 owner 位</td><td>L493–496 <code>wqeAddr</code> 与 <code>ownBit</code></td></tr>
+    <tr><td>L140–144</td><td>WQE 前 5 个 32 位字</td><td>L497–505，逐位一致（opcode=3、owner、SIGNALED、len、num_sge=1）</td></tr>
+    <tr><td>L145–151</td><td>远端 rkey + 目的 VA</td><td>L506–511，同取 <code>REMOTE_INPUT</code></td></tr>
+    <tr><td>L152–160</td><td>SGE：len、lkey、src VA</td><td>L514–521，同取 <code>LOCAL_OUTPUT</code></td></tr>
+    <tr><td>L161</td><td>WQE + SGE 写穿 cache</td><td>L524 <code>cacheWriteThrough</code></td></tr>
+    <tr><td>L164</td><td>doorbell 编码</td><td>L528–532：<code>wqn | (head%65536)&lt;&lt;32 | sl&lt;&lt;48</code></td></tr>
+    <tr><td>L169</td><td><code>DataCopyPad</code> 写 doorbell</td><td>L537–542</td></tr>
+    <tr><td>L171–174</td><td>把 head 写回 <code>headAddr</code></td><td>L545–550</td></tr>
+  </tbody>
+</table>
+
+<h3>9.3 WQE 字段表（为什么每一格都必须填）</h3>
+
+<table>
+  <thead><tr><th>偏移</th><th>字段</th><th>值</th><th>不填的后果</th></tr></thead>
+  <tbody>
+    <tr><td>0</td><td>opcode + owner + SIGNALED</td><td><code>3 | (~ownBit)&lt;&lt;7 | 1&lt;&lt;8</code></td><td>硬件不认这张 WQE</td></tr>
+    <tr><td>4</td><td>message length</td><td><code>bytes</code></td><td>写 0 字节</td></tr>
+    <tr><td>12</td><td>num_sge</td><td><code>1 &lt;&lt; 24</code></td><td>硬件找不到数据段</td></tr>
+    <tr><td>20</td><td>远端 rkey</td><td><code>REMOTE_INPUT.key</code></td><td>对端 RNIC 拒绝写入</td></tr>
+    <tr><td>24</td><td>远端虚拟地址</td><td><code>dst</code></td><td>写错位置或越界</td></tr>
+    <tr><td>SGE+0</td><td>本地长度</td><td><code>bytes</code></td><td>数据段长度为 0</td></tr>
+    <tr><td>SGE+4</td><td>本地 lkey</td><td><code>LOCAL_OUTPUT.key</code></td><td>本端 RNIC 拒绝读</td></tr>
+    <tr><td>SGE+8</td><td>本地源地址</td><td><code>src</code></td><td>读到错误内存</td></tr>
+  </tbody>
+</table>
+
+<h3>9.4 doorbell 位域</h3>
+
+<table>
+  <thead><tr><th>位</th><th>字段</th><th>来源</th></tr></thead>
+  <tbody>
+    <tr><td>[0:23]</td><td>DB_TAG（QP 号）</td><td><code>qp-&gt;wqn</code></td></tr>
+    <tr><td>[24:27]</td><td>DB_CMD</td><td>0（SQ doorbell）</td></tr>
+    <tr><td>[32:47]</td><td>DB_PI（生产者下标）</td><td><code>head % 65536</code></td></tr>
+    <tr><td>[48:50]</td><td>DB_SL（服务级别）</td><td><code>qp-&gt;sl</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout c-blue">
+  <b>为什么取第 0 个 QP：</b>测试创建 Buffer 时 <code class="inl">num_qps_per_rank=1</code>，所以 <code class="inl">qpNum=1</code>，每个目的 rank 只有一个 QP，我们取该 rank 区块的第一个即唯一一个。若以后调大 <code class="inl">num_qps_per_rank</code>，需要按 lane 再分摊，否则多核会抢同一个 SQ。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s10">10. 调试探针：LoadQpDesc / LoadQpState</h2>
+
+<pre><span class="c">// csrc/deepep/ops/op_kernel/cam_moe_layered_comm.h  L205–226（空指针安全）</span>
+__aicore__ <span class="k">inline void</span> LoadQpDesc(<span class="k">uint32_t</span> dstRank, <span class="k">uint64_t</span> &amp;infoPtr,
+                             <span class="k">uint32_t</span> &amp;qpNum, <span class="k">uint32_t</span> &amp;qpSize, <span class="k">uint64_t</span> &amp;qpAddr) <span class="k">const</span>
+{
+<span class="k">#ifndef</span> __DAV_C310__
+    infoPtr = <span class="k">reinterpret_cast</span>&lt;<span class="k">uint64_t</span>&gt;(rdmaInfo_);
+    qpNum = <span class="n">0U</span>; qpSize = <span class="n">0U</span>; qpAddr = <span class="n">0U</span>;
+    <span class="k">if</span> (infoPtr != <span class="n">0U</span>) {
+        qpNum  = rdmaInfo_-&gt;qpNum;
+        qpSize = rdmaInfo_-&gt;sizeOfAiRMAWQ;
+        qpAddr = (<span class="k">uint64_t</span>)rdmaInfo_-&gt;sqPtr +
+                 dstRank * qpNum * qpSize;
+    }
+<span class="k">#endif</span>
+}</pre>
+
+<p>调用点在 stage 6 的发送分支里（[notify_dispatch_normal_layered.cpp L833–840](file:///d:/trae_codes/1124/sgl-kernel-npu/csrc/deepep/ops/op_kernel/notify_dispatch_normal_layered.cpp#L833-L840)），输出：</p>
+
+<pre>[ln] qp dst=17 info=7f... num=1 size=... addr=...
+[ln] sq dst=17 head=2 tail=2 depth=...</pre>
+
+<table>
+  <thead><tr><th>日志</th><th>含义</th><th>下一步</th></tr></thead>
+  <tbody>
+    <tr><td><code>info=0</code></td><td>QP 表指针为空</td><td>查改动 1/2/4：host 是否走 A3 分支、<code>SetAicpuBlockDim</code> 是否生效、<code>SetCcTilingV2</code> 是否执行</td></tr>
+    <tr><td><code>info!=0, num=0</code></td><td>表在但传输未建好</td><td>查 AICPU 是否启动（block dim）、group 名是否一致、CANN 版本</td></tr>
+    <tr><td><code>head</code> 涨、<code>tail</code> 不动</td><td>队列无人消费</td><td>AICPU/HCCL 侧异常，查 <code>logs/cann</code></td></tr>
+    <tr><td><code>addr</code> 为 0 或极小</td><td>QP 地址算错</td><td>核对 <code>sqPtr</code>、<code>sizeOfAiRMAWQ</code> 与 <code>qpNum</code></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="s11">11. 为什么改前不行、改后可行</h2>
+
+<h3>11.1 改前：三个层次同时缺失</h3>
+
+<table>
+  <thead><tr><th>层次</th><th>缺什么</th><th>结果</th></tr></thead>
+  <tbody>
+    <tr><td>语义层</td><td>host 声明的是 AlltoAll（集合通信），不是 BatchWrite（单边写）</td><td>HCCL 没有理由准备 SQ/QP</td></tr>
+    <tr><td>接口层</td><td>kernel 没有 <code>Hccl</code> 客户端，也没有 <code>SetCcTilingV2</code></td><td>CC-Tiling 只停留在 TilingData 里，没有交给 HCCL</td></tr>
+    <tr><td>时序层</td><td>即使补了声明，若在 <code>op.Init</code> 之后才登记</td><td><code>rdmaInfo_</code> 已缓存为 0，后续无法刷新</td></tr>
+  </tbody>
+</table>
+
+<p><b>失败的直接形态：</b>stage 6 跨机分支走 <code class="inl">PostRdmaSend</code>，第一句 <code class="inl">rdmaInfo_-&gt;qpNum</code> 解引用空指针，该 AIV 退出；另一核在 <code class="inl">SyncAll</code> 等待，表现为挂死。方案 B（窗口直写）当时绕过了这里，但已于 <code class="inl">17fcc66</code> 移除，不再作为回退路径。</p>
+
+<h3>11.2 改后：闭环形成</h3>
+
+<ol>
+  <li>host 声明 <code>BatchWrite</code> + 分层算法，并分配 AICPU 控制面；</li>
+  <li>kernel <code>InitV2</code> 绑定通信域，<code>SetCcTilingV2</code> 登记参数；</li>
+  <li>AICPU 侧 HCCL 建传输，把 <code>qpNum / sqPtr / memPtr</code> 回填进 <code>aiRMAInfo</code>；</li>
+  <li><code>CommAdapter::Init</code> 读到有效指针；</li>
+  <li><code>PostRdmaSend</code> 用表里的 QP、rkey、lkey 构造 WQE，ring doorbell 完成一次单边写。</li>
+</ol>
+
+<div class="callout c-green">
+  <b>因此：</b>发送代码第一版就写对了，真正缺的是“让 HCCL 愿意并且在正确时机把表交出来”。本次改造没有新增发送逻辑，只补齐了声明与登记。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s12">12. A5 为什么保持原样</h2>
+
+<table>
+  <thead><tr><th>维度</th><th>A5（950）</th><th>A3（910_93）</th></tr></thead>
+  <tbody>
+    <tr><td>host 声明</td><td><code>AlltoAll + AIV_ENGINE</code>（保持不变）</td><td><code>BatchWrite + 默认 AICPU 引擎</code></td></tr>
+    <tr><td>kernel 通信</td><td><code>adv_api/hcomm</code> + <code>roce_/uboe_</code> 通道</td><td><code>Hccl&lt;AICPU&gt;</code> + AiRMA QP 表</td></tr>
+    <tr><td>是否读 <code>aiRMAInfo</code></td><td>否</td><td>是（唯一数据面来源）</td></tr>
+    <tr><td>为什么不能互换</td><td>A5 没有 AICPU 控制面，用 BatchWrite 反而丢掉 AIV 引擎路径</td><td>A3 没有 AIV 通信引擎，用 AIV_ENGINE 直接 <code>HCCL_E_PARA</code></td></tr>
+  </tbody>
+</table>
+
+<p>所以 <code class="inl">SetComm</code> 里用 <code class="inl">#ifdef __DAV_C310__</code> 分流，是两台机器硬件能力差异的直接映射，不是临时开关。</p>
+
+<!-- ============================================================ -->
+<h2 id="s13">13. 验证清单与失败模式</h2>
+
+<h3>13.1 小规格验证顺序</h3>
+
+<ol>
+  <li><code>NUM_TOKENS=16</code> 两端同时跑，确认 <code>info != 0</code>、<code>num=1</code>、stage 1–14 走完；</li>
+  <li>依次 32、64、128，只改 <code>NUM_TOKENS</code>，不需要重编译；</li>
+  <li>最后再回到 1024 做常规回归。</li>
+</ol>
+
+<h3>13.2 通过判据</h3>
+
+<pre>[ln] boot notify_dispatch_normal_layered
+[ln] tiling key 23 entered
+[ln] qp dst=&lt;peer&gt; info=&lt;非0&gt; num=1 ...
+[ln] sq dst=&lt;peer&gt; head=.. tail=.. depth=..
+[ln] stage 1 ... [ln] stage 14
+[ln] done notify_dispatch_normal_layered</pre>
+
+<h3>13.3 失败模式对照</h3>
+
+<table>
+  <thead><tr><th>现象</th><th>最先怀疑</th><th>检查点</th></tr></thead>
+  <tbody>
+    <tr><td><code>info=0</code></td><td>改动 1 / 4 没生效</td><td>host 是否 A3 分支、是否调用 <code>SetCcTilingV2</code>、<code>offsetof</code> 是否匹配结构体</td></tr>
+    <tr><td><code>num=0</code></td><td>改动 2 没生效</td><td><code>SetAicpuBlockDim</code> 是否为 6（跨机）、group 名是否与 <code>HcclGroup</code> 一致</td></tr>
+    <tr><td>卡在 <code>stage 6</code></td><td><code>PostRdmaSend</code> 自旋</td><td><code>tail</code> 是否推进、<code>logs/cann</code> 是否有 AICPU 报错</td></tr>
+    <tr><td><code>dst</code> 异常小（如 5280）</td><td>对端窗口未建立</td><td>remoteRes / 建链阶段、<code>[ln] ctx peer ... win=</code></td></tr>
+    <tr><td>501 / 507035 类错误</td><td>内存/参数越界</td><td>先确认不是本次 QP 路径，再查 UB 偏移与输出参数位置</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="s14">14. 行号索引</h2>
+
+<h3>14.1 本仓库（a5_layered @ 4489078 / 17fcc66）</h3>
+
+<table>
+  <thead><tr><th>文件</th><th>行号</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>op_host/notify_dispatch_normal_layered_tiling.cc</td><td>77–96</td><td><code>SetComm</code>：A5 / A3 分流</td></tr>
+    <tr><td>同上</td><td>87–95</td><td>A3：<code>opType=18</code> + BatchWrite algConfig</td></tr>
+    <tr><td>同上</td><td>300–305</td><td><code>SetAicpuBlockDim(6/1)</code></td></tr>
+    <tr><td>同上</td><td>308</td><td><code>SetTilingKey(23)</code></td></tr>
+    <tr><td>op_kernel/notify_dispatch_normal_layered_tiling.h</td><td>5–9</td><td>TilingData 头部 ABI</td></tr>
+    <tr><td>op_kernel/notify_dispatch_normal_layered.cpp</td><td>1308</td><td><code>GET_TILING_DATA_WITH_STRUCT</code></td></tr>
+    <tr><td>同上</td><td>1315–1318</td><td><code>contextGM0</code> / <code>Hccl</code> / <code>InitV2</code> / <code>SetCcTilingV2</code></td></tr>
+    <tr><td>同上</td><td>1347</td><td><code>op.Init</code>（读表）</td></tr>
+    <tr><td>同上</td><td>1354</td><td><code>hccl.Finalize()</code></td></tr>
+    <tr><td>op_kernel/cam_moe_layered_comm.h</td><td>33–36</td><td><code>rdmaInfo_ = context_-&gt;aiRMAInfo</code></td></tr>
+    <tr><td>同上</td><td>116–174</td><td><code>PostRdmaSend</code></td></tr>
+    <tr><td>同上</td><td>205–226</td><td><code>LoadQpDesc</code></td></tr>
+    <tr><td>同上</td><td>232–244</td><td><code>LoadQpState</code></td></tr>
+  </tbody>
+</table>
+
+<h3>14.2 arch22 参考实现</h3>
+
+<table>
+  <thead><tr><th>文件</th><th>行号</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>op_host/op_tiling/arch22/moe_distribute_dispatch_v2_tiling_arch22.cpp</td><td>130–136</td><td><code>MoeDistributeCombineA2GetAlgConfig</code></td></tr>
+    <tr><td>同上</td><td>784</td><td><code>SetAicpuBlockDim</code></td></tr>
+    <tr><td>同上</td><td>792–810</td><td><code>SetA2CommunicationConfig</code>：<code>Mc2CcTilingConfig(group, 18, alg)</code> + 两次 <code>GetTiling</code></td></tr>
+    <tr><td>op_kernel/arch22/moe_distribute_dispatch_a2_layered.h</td><td>285</td><td><code>Hccl&lt;HCCL_SERVER_TYPE_AICPU&gt; hccl_</code></td></tr>
+    <tr><td>同上</td><td>291–303</td><td><code>InitCommTiling</code>：<code>InitV2</code> / <code>SetCcTilingV2</code> / 取 <code>aiRMAInfo</code></td></tr>
+    <tr><td>同上</td><td>473–552</td><td><code>AIVRDMAPostSend</code>：WQE 与 doorbell</td></tr>
+    <tr><td>同上</td><td>1587</td><td><code>hccl_.Finalize()</code></td></tr>
+  </tbody>
+</table>
+
+<a class="back" href="index.html">← 返回文档目录</a>
+
+<footer>readme 分支 · a3_qp_table_change_walkthrough.html · 行号以本仓库当前内容为准</footer>
+
+</div>
+</body>
+</html>

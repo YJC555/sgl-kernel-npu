@@ -76,7 +76,7 @@
   <div class="meta">
     <span>分支：readme</span>
     <span>最后整理：2026-11-28</span>
-    <span>共 7 篇</span>
+    <span>共 8 篇</span>
   </div>
 </header>
 
@@ -86,8 +86,20 @@
   <span class="badge b-hist">历史</span> 标记的记录的是已经放弃或被替换的方案，保留是为了说明“为什么当时会那么做”。
 </div>
 
-<h2>主线：问题定位与改造 <span class="count">2 篇</span></h2>
+<h2>主线：问题定位与改造 <span class="count">3 篇</span></h2>
 <div class="grid">
+
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <a href="a3_qp_table_change_walkthrough.html">QP 表获取改造逐行解析（含 arch22 出处）</a>
+        <div class="file">a3_qp_table_change_walkthrough.html</div>
+      </div>
+      <span class="badge b-now">当前</span>
+    </div>
+    <p class="desc">六处改动逐行拆解：host 的 <code>SetComm</code>（opType=18 / BatchWrite）、<code>SetAicpuBlockDim</code>、TilingData ABI，kernel 的 <code>InitV2</code> / <code>SetCcTilingV2</code> / <code>Finalize</code>，以及 <code>PostRdmaSend</code> 如何消费 QP 表。每一处都标注 arch22 的文件与行号来源，并说明“不加会怎样”。</p>
+    <p class="who"><b>适合：</b>要核对改动出处、逐行对照参考实现时读。</p>
+  </div>
 
   <div class="card">
     <div class="card-top">
@@ -191,6 +203,7 @@
     <li>先读 <code>project_structure_explained.html</code>，建立仓库地形图。</li>
     <li>再读 <code>a3_a5_layered_mc2_deep_dive.html</code> 第 0、2 章，把名词和 tiling 补齐。</li>
     <li>然后读 <code>a3_qp_table_migration.html</code>，对照当前代码看这次改了什么、为什么这样改。</li>
+    <li>需要核对每一处改动的 arch22 出处时，读 <code>a3_qp_table_change_walkthrough.html</code>。</li>
     <li>需要精读实现时查 <code>notify_dispatch_normal_layered_kernel_explained.html</code>。</li>
     <li><code>a3_layered_plan_b_window_write.html</code> 只在想了解历史方案时读。</li>
     <li><code>notify_dispatch_normal_layered_507035.html</code> 作为错误码定位方法的补充案例。</li>
