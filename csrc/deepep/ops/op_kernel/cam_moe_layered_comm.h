@@ -14,6 +14,16 @@ namespace CamMoeLayered {
 
 using namespace AscendC;
 
+#ifndef __DAV_C310__
+// 910_93: the MC2 op is driven by the AICPU/KFC server (tiling declares
+// AlltoAll without AIV_ENGINE, aclnn sets AICPU). The launch context stays
+// HcclOpResParam; Hccl<AICPU> is what resolves windows: unlike the raw
+// remoteRes[].nextDevicePtr->windowsIn deref (which reads 0 for cross-node
+// peers in this mode), GetWindowsInAddr maps them, as proven by ops2's
+// cam_moe_dispatch_normal on this chip.
+using AicpuHccl = Hccl<HCCL_SERVER_TYPE_AICPU>;
+#endif
+
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()
 {
@@ -32,11 +42,10 @@ public:
         (void)isHybridDeployment;
         context_ = (__gm__ HcclOpParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
 #ifndef __DAV_C310__  // A3 transport
-        // The launch context is HcclOpResParam and the peer windows come from
-        // its relation table (`remoteRes[rank].nextDevicePtr->windowsIn`), same
-        // as ops/op_kernel/notify_dispatch.h. HCCL never publishes an AI-RMA QP
-        // table for an AlltoAll MC2 op on 910_93, so the data plane uses direct
-        // window writes.
+        // The launch context is HcclOpResParam; the peer windows are resolved
+        // through Hccl<AICPU> (bound by the entry via InitV2/SetCcTilingV2).
+        // HCCL never publishes an AI-RMA QP table for an AlltoAll MC2 op on
+        // 910_93, so the data plane uses direct window writes.
         rdmaInfo_ = (__gm__ HcclAiRMAInfo *)context_->aiRMAInfo;
         (void)roceContext;
 #else  // A5 Hcomm transport
@@ -48,6 +57,14 @@ public:
         }
 #endif
     }
+
+#ifndef __DAV_C310__
+    // Bound by the kernel entry right after Hccl<AICPU>::InitV2/SetCcTilingV2.
+    __aicore__ inline void BindAicpuHccl(AicpuHccl *hccl)
+    {
+        aicpuHccl_ = hccl;
+    }
+#endif
 
     __aicore__ inline uint32_t RankId() const
     {
@@ -70,6 +87,9 @@ public:
 #ifdef __DAV_C310__
         return (GM_ADDR)rdmaContext_->ipcBuffer[rank];
 #else
+        if (aicpuHccl_ != nullptr) {
+            return (GM_ADDR)aicpuHccl_->GetWindowsInAddr(rank);
+        }
         return GetBaseWindAddrByRankId(context_, rank, rankId_);
 #endif
     }
@@ -82,6 +102,9 @@ public:
 #ifdef __DAV_C310__
         return WindowIn(rank);
 #else
+        if (aicpuHccl_ != nullptr) {
+            return (GM_ADDR)aicpuHccl_->GetWindowsOutAddr(rank);
+        }
         if (rank == rankId_) {
             return (GM_ADDR)context_->localWindowsOut;
         }
@@ -112,6 +135,13 @@ public:
     __aicore__ inline void LoadPeerWindow(uint32_t rank, uint64_t &nextDevPtr, uint64_t &windowIn) const
     {
 #ifndef __DAV_C310__
+        // The window the data plane actually uses: Hccl<AICPU> when the entry
+        // bound it (the real path), otherwise the raw relation table.
+        if (aicpuHccl_ != nullptr) {
+            nextDevPtr = 0U;
+            windowIn = reinterpret_cast<uint64_t>(aicpuHccl_->GetWindowsInAddr(rank));
+            return;
+        }
         nextDevPtr = reinterpret_cast<uint64_t>(context_->remoteRes[rank].nextDevicePtr);
         windowIn = 0U;
         if (nextDevPtr != 0U) {
@@ -345,6 +375,7 @@ private:
     bool hcommInitOk_{false};
 #else
     __gm__ HcclAiRMAInfo *rdmaInfo_{nullptr};
+    AicpuHccl *aicpuHccl_{nullptr};
 #endif
     uint32_t rankId_{0};
 };

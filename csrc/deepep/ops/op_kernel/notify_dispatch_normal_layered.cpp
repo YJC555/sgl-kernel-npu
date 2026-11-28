@@ -77,6 +77,37 @@ class NotifyDispatchNormalLayered
 public:
     __aicore__ inline NotifyDispatchNormalLayered() {}
 
+#ifndef __DAV_C310__
+    // A3: the entry owns the Hccl<AICPU> object (InitV2 needs the tiling data).
+    // Must be called after InitV2/SetCcTilingV2 and before Process().
+    __aicore__ inline void BindAicpuHccl(CamMoeLayered::AicpuHccl *hccl)
+    {
+        comm_.BindAicpuHccl(hccl);
+    }
+#endif
+
+    // Re-print the HCCL window binding at the very end of the kernel. The
+    // per-core log buffer is a ring and the stop markers evict the init-time
+    // snapshot before a trap is dumped, so this line (the newest one) is what
+    // survives when a cross-device copy faults. `win` is the cross-node proxy's
+    // windowsIn as resolved by CommAdapter: a small/zero value there means the
+    // cross-server destination is not mapped for this op.
+    __aicore__ inline void DumpEndState()
+    {
+#if DEEPEP_LAYERED_DEBUG_LOG && !defined(__DAV_C310__)
+        const uint32_t rps = info_.ranksPerServer;
+        uint32_t peerRank = info_.epRankId;
+        if (rps != 0U && info_.serverNum != 0U) {
+            peerRank = ((info_.epRankId / rps + 1U) % info_.serverNum) * rps + info_.rankInServer;
+        }
+        const uint64_t selfWin = reinterpret_cast<uint64_t>(comm_.WindowIn(info_.epRankId));
+        const uint64_t peerWin = reinterpret_cast<uint64_t>(comm_.WindowIn(peerRank));
+        LAYERED_LOG("[ln] end aiv=%u rank=%u winB=%u self=%x peer=%u win=%x\n", GetBlockIdx(), info_.epRankId,
+                    static_cast<uint32_t>(comm_.WinSizeBytes()), static_cast<uint32_t>(selfWin), peerRank,
+                    static_cast<uint32_t>(peerWin));
+#endif
+    }
+
     // Print the stage id from AIV 0, drain every pipeline of this core and then
     // converge all cores. Called before each stage, so the marker printed last
     // identifies the stage that faulted (507035) or hung.
@@ -1366,6 +1397,18 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         auto hcommTensor = aggregateCopyTensor;
 #endif
         NotifyDispatchNormalLayered op;
+#ifndef __DAV_C310__
+        // 910_93: bind the AICPU MC2 domain and hand it the CC tiling, exactly
+        // like ops2's normal dispatch/combine kernels on this chip. The launch
+        // context stays HcclOpResParam; the adapter resolves peer windows
+        // through this handle (GetWindowsInAddr), which is the only source that
+        // maps cross-node ranks in this mode.
+        Hccl<HCCL_SERVER_TYPE_AICPU> aicpuHccl;
+        GM_ADDR aicpuCtx = AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+        aicpuHccl.InitV2(aicpuCtx, &data);
+        aicpuHccl.SetCcTilingV2(offsetof(NotifyDispatchNormalLayeredTilingData, mc2CcTiling));
+        op.BindAicpuHccl(&aicpuHccl);
+#endif
 #if DEEPEP_LAYERED_DEBUG_LOG
         PipeBarrier<PIPE_ALL>();
         if (GetBlockIdx() == 0U) {
@@ -1386,6 +1429,9 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
         op.Process();
 #if DEEPEP_LAYERED_DEBUG_LOG
         PipeBarrier<PIPE_ALL>();
+        if (GetBlockIdx() < kDebugAivCount) {
+            op.DumpEndState();
+        }
         if (GetBlockIdx() == 0U) {
             LAYERED_LOG("[ln] t23 post-process\n");
         }

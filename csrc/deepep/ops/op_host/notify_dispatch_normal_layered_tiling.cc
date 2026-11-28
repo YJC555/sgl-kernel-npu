@@ -87,16 +87,24 @@ int SetComm(NotifyDispatchNormalLayeredTilingData *d, const std::string &g, bool
     int init = 0;
     int cc = 0;
     (void)crossServer;
-    // A3 (910_93) and A5 (950) both declare AlltoAll on the AIV engine. This is
-    // exactly what the working 910_93 notify op uses (ops/op_host/
-    // notify_dispatch_tiling.cc: OP_TYPE_ALL_TO_ALL + SetCommEngine(AIV_ENGINE),
-    // "no AICPU launched"), and what ops2's normal dispatch/combine use. The
-    // BatchWrite/opType-18 form is an A2 (910B) declaration; 910_93 rejects it
-    // with E_PARA inside HcclAllocComResourceBytiling. AIV_ENGINE keeps the
-    // control plane on the AIV cores, i.e. no collective is executed for us.
+#ifdef __DAV_C310__
+    // A5 (950): HCCL exposes the AIV communication engine, so the op keeps the
+    // AlltoAll declaration and never needs an AI-RMA QP table.
     AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
     c.SetCommEngine(mc2tiling::AIV_ENGINE);
     std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aiv\n");
+#else
+    // A3 (910_93): follow the normal dispatch/combine kernels that do work on
+    // this chip (ops2 cam_moe_dispatch_normal_tiling.cc): opType 8 + AlltoAll
+    // with the communication engine left at its default (AICPU). Do NOT set
+    // AIV_ENGINE here: with it HCCL does not map the cross-node peer windows,
+    // so remoteRes[].nextDevicePtr->windowsIn reads as 0 and the kernel's first
+    // cross-server copy traps with "MTE accesses an invalid GM address". The
+    // BatchWrite/opType-18 form is an A2 (910B) declaration and is rejected by
+    // 910_93 with E_PARA inside HcclAllocComResourceBytiling.
+    AscendC::Mc2CcTilingConfig c(g, 8U, "AlltoAll=level0:fullmesh;level1:pairwise");
+    std::fprintf(stderr, "[ln-host] mc2 opType=8 alg=AlltoAll engine=aicpu\n");
+#endif
     init = static_cast<int>(c.GetTiling(d->mc2InitTiling));
     cc = static_cast<int>(c.GetTiling(d->mc2CcTiling));
     std::fprintf(stderr, "[ln-host] mc2 tiling init=%d cc=%d\n", init, cc);

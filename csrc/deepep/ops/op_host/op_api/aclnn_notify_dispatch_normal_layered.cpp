@@ -31,15 +31,19 @@ extern "C" aclnnStatus aclnnNotifyDispatchNormalLayered(void *workspace, uint64_
                                                         aclOpExecutor *executor, aclrtStream stream)
 {
     const auto soc = op::GetCurrentPlatformInfo().GetSocVersion();
-    // tiling 声明 AlltoAll + SetCommEngine(AIV_ENGINE)，与 910_93 上跑通的
-    // notify_dispatch / ops2 normal dispatch 一致：通信控制面在 AIV 核上（不拉起
-    // AICPU），服务端类型为 MTE。只有 910B(A2) 的 BatchWrite 路径才用 AICPU。
+#ifdef __DAV_C310__
+    // A5: tiling 声明 AlltoAll + AIV_ENGINE，通信控制面在 AIV 核上，服务端为 MTE。
     const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_MTE;
+#else
+    // A3: tiling 用 ops2 normal dispatch/combine 在 910_93 上的写法（opType 8 +
+    // AlltoAll、不设 AIV_ENGINE），MC2 域由 AICPU/KFC 服务端驱动。kernel 侧用
+    // Hccl<AICPU>::InitV2/SetCcTilingV2 绑定并通过 GetWindowsInAddr 取对端窗口。
+    const NnopbaseHcclServerType serverType = NNOPBASE_HCCL_SERVER_TYPE_AICPU;
+#endif
     std::fprintf(stderr, "[ln-host] aclnn notify exec soc=%d hook=%d server=%d\n", static_cast<int>(soc),
                  NnopbaseSetHcclServerType != nullptr, static_cast<int>(serverType));
     if (NnopbaseSetHcclServerType) {
-        // kernel 通过 GetHcclContext 取 MC2 op param：A3 是 HcclOpResParam，
-        // A5 是 HcclCombinOpParam。
+        // kernel 通过 GetHcclContext 取 MC2 op param：两种芯片都是 HcclOpResParam。
         NnopbaseSetHcclServerType(executor, serverType);
     }
     std::fprintf(stderr, "[ln-host] tp 4 pre-inner ws=%llu exec=%llx\n",
