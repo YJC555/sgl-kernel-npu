@@ -88,23 +88,59 @@ public:
 
     // Re-print the HCCL window binding at the very end of the kernel. The
     // per-core log buffer is a ring and the stop markers evict the init-time
-    // snapshot before a trap is dumped, so this line (the newest one) is what
-    // survives when a cross-device copy faults. `win` is the cross-node proxy's
-    // windowsIn as resolved by CommAdapter: a small/zero value there means the
-    // cross-server destination is not mapped for this op.
+    // snapshot before a trap is dumped, so these lines (the newest ones) are
+    // what survive when a cross-device copy faults. Every address is computed,
+    // never dereferenced: reading a bad peer window here would reproduce the
+    // MTE fault this dump is meant to explain.
     __aicore__ inline void DumpEndState()
     {
 #if DEEPEP_LAYERED_DEBUG_LOG && !defined(__DAV_C310__)
         const uint32_t rps = info_.ranksPerServer;
+        uint32_t peerServer = 0U;
         uint32_t peerRank = info_.epRankId;
         if (rps != 0U && info_.serverNum != 0U) {
-            peerRank = ((info_.epRankId / rps + 1U) % info_.serverNum) * rps + info_.rankInServer;
+            peerServer = (info_.epRankId / rps + 1U) % info_.serverNum;
+            peerRank = peerServer * rps + info_.rankInServer;
         }
-        const uint64_t selfWin = reinterpret_cast<uint64_t>(comm_.WindowIn(info_.epRankId));
-        const uint64_t peerWin = reinterpret_cast<uint64_t>(comm_.WindowIn(peerRank));
-        LAYERED_LOG("[ln] end aiv=%u rank=%u winB=%u self=%x peer=%u win=%x\n", GetBlockIdx(), info_.epRankId,
-                    static_cast<uint32_t>(comm_.WinSizeBytes()), static_cast<uint32_t>(selfWin), peerRank,
-                    static_cast<uint32_t>(peerWin));
+        const uint64_t selfIn = reinterpret_cast<uint64_t>(comm_.WindowIn(info_.epRankId));
+        const uint64_t selfOut = reinterpret_cast<uint64_t>(comm_.WindowOut(info_.epRankId));
+        const uint64_t peerIn = reinterpret_cast<uint64_t>(comm_.WindowIn(peerRank));
+        const uint64_t peerOut = reinterpret_cast<uint64_t>(comm_.WindowOut(peerRank));
+        // Exact cross-node destinations the data plane wrote: the stage-6
+        // count-control lane towards the next server and the stage-13 base-ack
+        // lane towards it. `in`+off must reproduce the [ln] ctl dst= seen in
+        // stage 6, and `pin`+ack must reproduce the [ln] ack dst= of stage 13.
+        const uint64_t ctlDst = peerIn + ControlLaneOffset(layout_, info_.epWorldSize, info_.epRankId, peerServer);
+        const uint64_t ackDst = peerIn + BaseAckLaneOffset(layout_, info_.epWorldSize, peerRank, sourceServer_);
+        uint64_t ctx = 0U;
+        uint64_t aiRmaSize = 0U;
+        uint64_t aiRmaInfo = 0U;
+        uint32_t ctxDim = 0U;
+        comm_.LoadContextDesc(ctx, ctxDim, aiRmaSize, aiRmaInfo);
+        // Which peer the AIVs actually wrote to is decided by the target loop,
+        // and the faulting target may be owned by an AIV that does not print
+        // (only the first kDebugAivCount do). AIV 0 therefore lists the window
+        // of every proxy rank once, capped so one bad run cannot flood the ring.
+        if (GetBlockIdx() == 0U) {
+            uint32_t shown = 0U;
+            for (uint32_t target = 0U; target < info_.serverNum && shown < 8U; ++target, ++shown) {
+                const uint32_t rank = target * rps + info_.rankInServer;
+                LAYERED_LOG("[ln] end win t=%u r=%u in=%x out=%x\n", target, rank,
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(comm_.WindowIn(rank))),
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(comm_.WindowOut(rank))));
+            }
+        }
+        LAYERED_LOG("[ln] end aiv=%u rank=%u winB=%u rps=%u srv=%u\n", GetBlockIdx(), info_.epRankId,
+                    static_cast<uint32_t>(comm_.WinSizeBytes()), rps, info_.serverNum);
+        LAYERED_LOG("[ln] end ctx=%x dim=%u aiRmaSz=%u aiRma=%x\n", static_cast<uint32_t>(ctx), ctxDim,
+                    static_cast<uint32_t>(aiRmaSize), static_cast<uint32_t>(aiRmaInfo));
+        LAYERED_LOG("[ln] end self in=%x out=%x\n", static_cast<uint32_t>(selfIn),
+                    static_cast<uint32_t>(selfOut));
+        LAYERED_LOG("[ln] end peer r=%u in=%x out=%x\n", peerRank, static_cast<uint32_t>(peerIn),
+                    static_cast<uint32_t>(peerOut));
+        LAYERED_LOG("[ln] end dst ctl=%x ack=%x st=%u/%u\n", static_cast<uint32_t>(ctlDst),
+                    static_cast<uint32_t>(ackDst), static_cast<uint32_t>(layout_.controlStride),
+                    static_cast<uint32_t>(layout_.baseAckStride));
 #endif
     }
 
@@ -857,6 +893,11 @@ private:
             // 发送给同号卡
             TracePoint(701U, target);
             const uint32_t proxyRank = target * info_.ranksPerServer + info_.rankInServer;
+            // 700 -> 703 brackets the window resolution. A3 resolves the peer
+            // window through Hccl<AICPU>::GetWindowsInAddr, which reads the
+            // shared AICPU context: if the last marker is 700 the fault is in
+            // that lookup, not in the copy that follows.
+            TracePoint(700U, proxyRank);
             auto *in = (__gm__ uint8_t *)comm_.WindowIn(proxyRank);
             // 目的位置
             auto *dst = in + off;
@@ -873,10 +914,21 @@ private:
                 LAYERED_LOG("[ln] ctl dst=%x src=%x bytes=%u\n",
                             static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst)),
                             static_cast<uint32_t>(reinterpret_cast<uint64_t>(payload)), layout_.controlStride);
+                // in+off must equal dst; in and flagOff are what a bad mapping
+                // shows up in when dst itself still looks plausible.
+                LAYERED_LOG("[ln] ctl in=%x off=%x foff=%x\n",
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(in)), static_cast<uint32_t>(off),
+                            static_cast<uint32_t>(flagOff));
             }
 #endif
             if (proxyRank == info_.epRankId || comm_.DirectWindowWrite()) {
                 CopyWindowBytes(payload, dst, layout_.controlStride);
+#if DEEPEP_LAYERED_DEBUG_LOG
+                // Drain MTE3 here so a bad peer destination traps inside this
+                // iteration (between markers 703 and 704) instead of being
+                // reported at kernel exit as a bare cross-device MTE error.
+                SyncFunc<HardEvent::MTE3_S>();
+#endif
             } else {
 #if DEEPEP_LAYERED_DEBUG_LOG
                 if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
@@ -1165,15 +1217,33 @@ private:
         for (uint32_t sourceServer = aiv; sourceServer < info_.serverNum; sourceServer += aivNum) {
             const uint32_t source = sourceServer * info_.ranksPerServer + info_.rankInServer;
             auto *ack = out + BaseAckLaneOffset(layout_, info_.epWorldSize, source, sourceServer_);
+            // 1300 -> 1301 brackets the peer-window lookup (see 700 in stage 6);
+            // 1303 marks the copy done and separates it from the flag that
+            // follows, so the last marker names which of the three faulted.
+            TracePoint(1300U, source);
             auto *sin = (__gm__ uint8_t *)comm_.WindowIn(source);
             // [ownerInServer][localExpert]
             auto *dst = sin + BaseAckLaneOffset(layout_, info_.epWorldSize, source, sourceServer_);
             TracePoint(1301U, sourceServer);
+#if DEEPEP_LAYERED_DEBUG_LOG
+            if (static_cast<uint32_t>(GetBlockIdx()) < kDebugAivCount) {
+                LAYERED_LOG("[ln] ack src=%u in=%x ack=%x dst=%x st=%u\n", source,
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(sin)),
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(ack)),
+                            static_cast<uint32_t>(reinterpret_cast<uint64_t>(dst)),
+                            static_cast<uint32_t>(layout_.baseAckStride));
+            }
+#endif
             if (source == info_.epRankId || comm_.DirectWindowWrite()) {
                 CopyWindowBytes(ack, dst, layout_.baseAckStride);
+#if DEEPEP_LAYERED_DEBUG_LOG
+                // Same as stage 6: surface a bad peer address at 1301/1303.
+                SyncFunc<HardEvent::MTE3_S>();
+#endif
             } else {
                 comm_.PostRdmaSend(ack, dst, source, layout_.baseAckStride, *doorbell_, *head_);
             }
+            TracePoint(1303U, sourceServer);
             auto *flag =
                 (__gm__ uint64_t *)(out + BaseAckFlagOffset(layout_, info_.epWorldSize, source, sourceServer_));
             *flag = ComposeFlag(info_.epoch, Phase::CONTROL_BASE_READY);
@@ -1428,6 +1498,10 @@ extern "C" __global__ __aicore__ void notify_dispatch_normal_layered(GM_ADDR roc
 #endif
         op.Process();
 #if DEEPEP_LAYERED_DEBUG_LOG
+        // 1406 is emitted by every traced AIV (unlike the block-0-only markers
+        // below), so a missing 1406 on AIV 1 means stage 14 never returned there
+        // even though the trailing [ln] end lines may still show up.
+        op.TracePoint(1406U, 0U);
         PipeBarrier<PIPE_ALL>();
         if (GetBlockIdx() < kDebugAivCount) {
             op.DumpEndState();
