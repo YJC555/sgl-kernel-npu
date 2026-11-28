@@ -101,7 +101,14 @@
 } <span class="k">else</span> {
     comm_.<span class="n">PostRdmaSend</span>(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
 }</pre>
-  <p>A3 上 <code class="inl">DirectWindowWrite()</code> 恒为 <code class="inl">true</code>，理论上应该走左边。但更早的版本里它走的是右边，于是：</p>
+  <p>注意这三个版本的区别：<b>分支第一版</b>（<code class="inl">81454d1 a5 layered init</code>，即最初克隆/初始化后的版本，upstream main 里还没有这个文件）里<b>没有</b> <code class="inl">DirectWindowWrite()</code>，发送分支是 <code class="inl">if (proxyRank == info_.epRankId) Copy else PostRdmaSend</code>，所以 A3 跨机必然走右边 → 空指针。后来方案 B（<code class="inl">6f10fc4</code>）才加入 <code class="inl">DirectWindowWrite()</code> 并让 A3 恒为 <code class="inl">true</code>，于是走左边。本次改造（<code class="inl">4489078</code>）把它改成“有 QP 表就走 <code class="inl">PostRdmaSend</code>，没有才回退”。第一版的代码是：</p>
+  <pre><span class="c">// 81454d1（分支第一版）</span>
+<span class="k">if</span> (proxyRank == info_.epRankId) {
+    CopyWindowBytes(payload, dst, layout_.controlStride);
+} <span class="k">else</span> {
+    comm_.PostRdmaSend(payload, dst, proxyRank, layout_.controlStride, *doorbell_, *head_);
+}</pre>
+  <p>当时的 <code class="inl">PostRdmaSend</code> 第一句就是：</p>
   <pre><span class="c">// PostRdmaSend 的第一句</span>
 <span class="k">auto</span> qpNum = <span class="hi">rdmaInfo_-&gt;qpNum</span>;   <span class="c">// rdmaInfo_ == nullptr → 该核直接退出</span></pre>
   <p>跨机那一支空指针退出，其余核卡在 <code class="inl">StageBoundary(7)</code> 的 <code class="inl">SyncAll</code> 等它，全体挂死。定位探针打印出的关键证据只有一条：</p>
